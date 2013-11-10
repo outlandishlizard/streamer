@@ -16,21 +16,15 @@ struct monitor_cond {
 
 struct monitor *monitor_create (void) {
   struct monitor *returnee = (struct monitor *) malloc(sizeof(struct monitor));
-  pthread_mutexattr_t ma;
-  pthread_mutexattr_init(&ma);
-  pthread_mutex_init(&returnee->lock, &ma);
-  pthread_condattr_t ca;
-  pthread_condattr_init(&ca);
-  pthread_cond_init(&returnee->queue, &ca);
+  pthread_mutex_init(&returnee->lock, NULL);
+  pthread_cond_init(&returnee->queue, NULL);
   returnee->active = 0;
   return returnee;
 }
 
 struct monitor_cond *monitor_cond_create (struct monitor *monitor) {
   struct monitor_cond *returnee = (struct monitor_cond *) malloc(sizeof(struct monitor_cond));
-  pthread_condattr_t a;
-  pthread_condattr_init(&a);
-  pthread_cond_init(&returnee->cond, &a);
+  pthread_cond_init(&returnee->cond, NULL);
   returnee->waiting = 0;
   returnee->monitor = monitor;
   return returnee;
