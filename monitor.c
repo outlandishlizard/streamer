@@ -45,7 +45,7 @@ void monitor_cond_destroy (struct monitor_cond *c) {
 }
 
 void monitor_run_fn (struct monitor *m,
-                     monitor_func f,
+                     void (*f)(void *),
                      void *user_data) {
   /* Grab lock, and enter monitor */
   pthread_mutex_lock(&m->lock);
