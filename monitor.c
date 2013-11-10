@@ -44,12 +44,18 @@ void monitor_cond_destroy (struct monitor_cond *c) {
 void monitor_run_fn (struct monitor *m,
                      monitor_func f,
                      void *user_data) {
+  /* Grab lock, and enter monitor */
   pthread_mutex_lock(&m->lock);
   m->active++;
   if (m->active > 1) {
+    /* There's another thread that's trying to execute now; defer to it to
+       avoid starvation. */
     pthread_cond_wait(&m->queue, &m->lock);
-  } /* If not, don't wait, because no one will signal us. */
+  }
+  /* Else, no threads trying to execute now; skip the wait to avoid
+     deadlock */
   f(user_data);
+  /* Leave monitor, and signal another waiting thread to execute */
   m->active--;
   pthread_cond_signal(&m->queue);
   pthread_mutex_unlock(&m->lock);
@@ -57,10 +63,13 @@ void monitor_run_fn (struct monitor *m,
 
 /* Caller must own monitor mutex */
 void monitor_cond_wait (struct monitor_cond *c) {
+  /* Shift thread from 'active' to 'waiting on c' */
   c->monitor->active--;
-  pthread_cond_signal(&c->monitor->queue);
   c->waiting++;
+  /* Queue up another thread, and wait */
+  pthread_cond_signal(&c->monitor->queue);
   pthread_cond_wait(&c->cond, &c->monitor->lock);
+  /* Shift thread from 'waiting on c' to 'active' */
   c->waiting--;
   c->monitor->active++;
 }
@@ -68,9 +77,13 @@ void monitor_cond_wait (struct monitor_cond *c) {
 /* Caller must own monitor mutex */
 void monitor_cond_signal (struct monitor_cond *c) {
   if (c->waiting) {
-    pthread_cond_signal(&c->cond);
+    /* Shift thread from 'active' to 'inactive' */
     c->monitor->active--;
+    /* Queue up another thread, and wait */
+    pthread_cond_signal(&c->cond);
     pthread_cond_wait(&c->monitor->queue, &c->monitor->lock);
+    /* Shift thread from 'inactive' to 'active */
     c->monitor->active++;
   }
+  /* If no threads waiting on c, do nothing at all. */
 }
