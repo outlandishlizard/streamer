@@ -1,12 +1,8 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
-typedef struct 
-{
-	int socket;
-	int* video; //Filler
+#include <circular_buffer.h>
 
-} text_producer_job;
 
 typedef struct
 {
