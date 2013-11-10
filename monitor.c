@@ -2,15 +2,18 @@
 #include <stdlib.h>
 #include "monitor.h"
 
+/* All variables in the monitor, as well as in any associated monitor_cond,
+   may be modified ONLY by a thread holding the monitor's 'lock' mutex. */
+
 struct monitor {
   pthread_mutex_t lock;
-  pthread_cond_t queue; /* associated with lock */
-  int active; /* locked by lock */
+  pthread_cond_t queue;
+  int active;
 };
 
 struct monitor_cond {
-  pthread_cond_t cond; /* associated with monitor's lock */
-  int waiting; /* locked by monitor's lock */
+  pthread_cond_t cond;
+  int waiting;
   struct monitor *monitor;
 };
 
