@@ -43,7 +43,7 @@ static struct mythread_driver_t {
 
 
 
-mythread_mutex_t mythread_mutex_create (void) {
+mythread_mutex_t mythread_mutex_init (void) {
   long mutex;
   struct mythread_mutex *m;
   spin_lock(&mythread_driver.sl);
@@ -136,7 +136,7 @@ long mythread_mutex_destroy (mythread_mutex_t mutex) {
   return 0;
 }
 
-mythread_cond_t mythread_cond_create (void) {
+mythread_cond_t mythread_cond_init (void) {
   long cond;
   struct mythread_cond *c;
   spin_lock(&mythread_driver.sl);
@@ -232,8 +232,8 @@ asmlinkage long mythread_syscall (enum mythread_op op,
   mythread_cond_t cond;
 
   switch (op) {
-  case MYTHREAD_MUTEX_CREATE:
-    r = mythread_mutex_create();
+  case MYTHREAD_MUTEX_INIT:
+    r = mythread_mutex_init();
     if (r < 0) {
       return r; /* Error code */
     } else {
@@ -258,8 +258,8 @@ asmlinkage long mythread_syscall (enum mythread_op op,
       return -EINVAL;
     }
     return mythread_mutex_destroy(mutex);
-  case MYTHREAD_COND_CREATE:
-    r = mythread_cond_create();
+  case MYTHREAD_COND_INIT:
+    r = mythread_cond_init();
     if (r < 0) {
       return r; /* Error code */
     } else {
