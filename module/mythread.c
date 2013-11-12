@@ -126,7 +126,7 @@ long mythread_mutex_destroy (mythread_mutex_t mutex) {
       spin_unlock(&mythread_driver.sl);
       /* Found an active cond--- don't destroy after all. */
       spin_lock(&m->sl);
-      m->extant = 0;
+      m->extant = 1;
       spin_unlock(&m->sl);
       return -EBUSY;
     }
