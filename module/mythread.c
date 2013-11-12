@@ -6,7 +6,7 @@
 #include <linux/syscalls.h>
 #include <linux/linkage.h>
 
-#include "syscall_config.h"
+#include "../syscall_config.h"
 
 MODULE_LICENSE("GPL");
 
