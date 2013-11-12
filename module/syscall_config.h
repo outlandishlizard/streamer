@@ -1,7 +1,7 @@
 #ifndef __SYSCALL_CONFIG_H
 #define __SYSCALL_CONFIG_H
 
-#define SYSCALL_HOLE 248
+#define SYSCALL_HOLE 223 /* Hole on at least some 32-bit systems */
 
 enum mythread_op {
   MYTHREAD_MUTEX_CREATE,
