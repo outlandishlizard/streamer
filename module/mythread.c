@@ -2,11 +2,11 @@
 #include <linux/module.h>
 #include <linux/init.h>
 
-#include <asm/syscall.h>
 #include <asm/uaccess.h>
-#include <linux/syscalls.h>
 #include <linux/linkage.h>
 #include <linux/kallsyms.h>
+#include <linux/wait.h>
+#include <linux/sched.h>
 
 #include "../syscall_config.h"
 
