@@ -3,8 +3,7 @@
 
 #define SYSCALL_HOLE 223 /* Hole on at least some 32-bit systems */
 
-typedef long mythread_mutex_t;
-typedef long mythread_cond_t;
+#include "mythread_types.h"
 
 enum mythread_op {
   MYTHREAD_MUTEX_INIT,
