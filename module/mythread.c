@@ -16,9 +16,6 @@ MODULE_LICENSE("GPL");
  *
  */
 
-/* This struct contains all non-constant state for the kernel module.  It is
- * also used as the driver pointer in the IRQ handler request. */
-
 struct mythread_mutex {
   int extant;
   int locked;
@@ -32,6 +29,7 @@ struct mythread_cond {
   spinlock_t sl;
 };
 
+/* Arbitrary limits so I don't have to manage memory */
 #define NUM_MUTICES 32
 #define NUM_CONDS 256
 
