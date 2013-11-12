@@ -6,6 +6,7 @@
 #include <asm/uaccess.h>
 #include <linux/syscalls.h>
 #include <linux/linkage.h>
+#include <linux/kallsyms.h>
 
 #include "../syscall_config.h"
 
@@ -294,19 +295,37 @@ asmlinkage long mythread_syscall (enum mythread_op op,
 }
 
 static int __init init_function (void) {
+  void **sys_call_table;
   printk("<1>Hello, World!\n");
   printk("<1>Loading George's Module\n");
   printk("<1>Inserting syscall...\n");
+  if (!kallsyms_lookup_name("sys_ni_syscall")) {
+    printk("<1> Couldn't find symbol sys_ni_syscall; won't be able to unload correctly.\n");
+    return -1;
+  }
+  sys_call_table = (void **) kallsyms_lookup_name("sys_call_table");
+  if (!sys_call_table) {
+    printk("<1> Couldn't find symbol sys_call_table; can't load correctly.\n");
+    return -1;
+  }
   spin_lock_init(&mythread_driver.sl);
   mythread_driver.num_mutices = 0;
   mythread_driver.num_conds = 0;
-  //  sys_call_table[SYSCALL_HOLE] = mythread_syscall;
+  sys_call_table[SYSCALL_HOLE] = mythread_syscall;
   return 0;
 }
 
 static void __exit cleanup_function (void) {
+  void *sys_ni_syscall = (void *) kallsyms_lookup_name("sys_ni_syscall");
+  void **sys_call_table = (void **) kallsyms_lookup_name("sys_call_table");
+  if (!sys_ni_syscall) {
+    printk("<1> Couldn't find symbol sys_ni_syscall; can't unload correctly.\n");
+  }
+  if (!sys_call_table) {
+    printk("<1> Couldn't find symbol sys_call_table; can't unload correctly.\n");
+  }
   printk("<1>Removing syscall...\n");
-  //  sys_call_table[SYSCALL_HOLE] = sys_ni_syscall;
+  sys_call_table[SYSCALL_HOLE] = sys_ni_syscall;
   printk("<1>Goodbye, cruel world.\n");
 }
 
