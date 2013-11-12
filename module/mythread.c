@@ -3,6 +3,7 @@
 #include <linux/init.h>
 
 #include <asm/syscall.h>
+#include <asm/uaccess.h>
 #include <linux/syscalls.h>
 #include <linux/linkage.h>
 
@@ -26,7 +27,7 @@ struct mythread_mutex {
 struct mythread_cond {
   int extant;
   wait_queue_head_t queue;
-  long mutex;
+  mythread_mutex_t mutex;
   spinlock_t sl;
 };
 
@@ -43,7 +44,7 @@ static struct mythread_driver_t {
 
 
 
-unsigned long mythread_mutex_create (void) {
+mythread_mutex_t mythread_mutex_create (void) {
   long mutex;
   struct mythread_mutex *m;
   spin_lock(&mythread_driver.sl);
@@ -61,7 +62,7 @@ unsigned long mythread_mutex_create (void) {
   return mutex;
 }
 
-unsigned long mythread_mutex_lock (long mutex) {
+long mythread_mutex_lock (mythread_mutex_t mutex) {
   struct mythread_mutex *m = &mythread_driver.mutices[mutex];
   spin_lock(&m->sl);
   if (!m->extant) {
@@ -86,7 +87,7 @@ unsigned long mythread_mutex_lock (long mutex) {
   return 0;
 }
 
-unsigned long mythread_mutex_unlock (long mutex) {
+long mythread_mutex_unlock (mythread_mutex_t mutex) {
   struct mythread_mutex *m = &mythread_driver.mutices[mutex];
   spin_lock(&m->sl);
   if (!m->extant) {
@@ -104,7 +105,7 @@ unsigned long mythread_mutex_unlock (long mutex) {
   return 0;
 }
 
-unsigned long mythread_mutex_destroy (long mutex) {
+long mythread_mutex_destroy (mythread_mutex_t mutex) {
   struct mythread_mutex *m = &mythread_driver.mutices[mutex];
   long cond;
   spin_lock(&mythread_driver.sl);
@@ -136,7 +137,7 @@ unsigned long mythread_mutex_destroy (long mutex) {
   return 0;
 }
 
-unsigned long mythread_cond_create (void) {
+mythread_cond_t mythread_cond_create (void) {
   long cond;
   struct mythread_cond *c;
   spin_lock(&mythread_driver.sl);
@@ -155,7 +156,7 @@ unsigned long mythread_cond_create (void) {
   return cond;
 }
 
-unsigned long mythread_cond_wait (long cond, long mutex) {
+long mythread_cond_wait (mythread_cond_t cond, mythread_mutex_t mutex) {
   struct mythread_cond *c = &mythread_driver.conds[cond];
   DEFINE_WAIT(__wait);
 
@@ -192,7 +193,7 @@ unsigned long mythread_cond_wait (long cond, long mutex) {
   }
 }
 
-unsigned long mythread_cond_signal (long cond) {
+long mythread_cond_signal (mythread_cond_t cond) {
   struct mythread_cond *c = &mythread_driver.conds[cond];
   spin_lock(&c->sl);
   if (c->extant) {
@@ -205,7 +206,7 @@ unsigned long mythread_cond_signal (long cond) {
   }
 }
 
-unsigned long mythread_cond_destroy (long cond) {
+long mythread_cond_destroy (mythread_cond_t cond) {
   struct mythread_cond *c = &mythread_driver.conds[cond];
   spin_lock(&c->sl);
   if (c->extant) {
@@ -225,25 +226,68 @@ unsigned long mythread_cond_destroy (long cond) {
 }
 
 asmlinkage long mythread_syscall (enum mythread_op op,
-                                  unsigned long a,
-                                  unsigned long b) {
+                                  mythread_mutex_t *m,
+                                  mythread_cond_t *c) {
+  long r; /* possible return value */
+  mythread_mutex_t mutex;
+  mythread_cond_t cond;
+
   switch (op) {
   case MYTHREAD_MUTEX_CREATE:
-    return mythread_mutex_create();
+    r = mythread_mutex_create();
+    if (r < 0) {
+      return r; /* Error code */
+    } else {
+      mutex = (mythread_mutex_t) r;
+      if (copy_to_user(m, &mutex, sizeof(mythread_mutex_t))) {
+        return -EINVAL;
+      }
+      return 0;
+    }
   case MYTHREAD_MUTEX_LOCK:
-    return mythread_mutex_lock(a);
+    if (copy_from_user(&mutex, m, sizeof(mythread_mutex_t))) {
+      return -EINVAL;
+    }
+    return mythread_mutex_lock(mutex);
   case MYTHREAD_MUTEX_UNLOCK:
-    return mythread_mutex_unlock(a);
+    if (copy_from_user(&mutex, m, sizeof(mythread_mutex_t))) {
+      return -EINVAL;
+    }
+    return mythread_mutex_unlock(mutex);
   case MYTHREAD_MUTEX_DESTROY:
-    return mythread_mutex_destroy(a);
+    if (copy_from_user(&mutex, m, sizeof(mythread_mutex_t))) {
+      return -EINVAL;
+    }
+    return mythread_mutex_destroy(mutex);
   case MYTHREAD_COND_CREATE:
-    return mythread_cond_create();
+    r = mythread_cond_create();
+    if (r < 0) {
+      return r; /* Error code */
+    } else {
+      cond = (mythread_cond_t) r;
+      if (copy_to_user(c, &cond, sizeof(mythread_cond_t))) {
+        return -EINVAL;
+      }
+      return 0;
+    }
   case MYTHREAD_COND_WAIT:
-    return mythread_cond_wait(a, b);
+    if (copy_from_user(&mutex, m, sizeof(mythread_mutex_t))) {
+      return -EINVAL;
+    }
+    if (copy_from_user(&cond, c, sizeof(mythread_cond_t))) {
+      return -EINVAL;
+    }
+    return mythread_cond_wait(cond, mutex);
   case MYTHREAD_COND_SIGNAL:
-    return mythread_cond_signal(a);
+    if (copy_from_user(&cond, c, sizeof(mythread_cond_t))) {
+      return -EINVAL;
+    }
+    return mythread_cond_signal(cond);
   case MYTHREAD_COND_DESTROY:
-    return mythread_cond_destroy(a);
+    if (copy_from_user(&cond, c, sizeof(mythread_cond_t))) {
+      return -EINVAL;
+    }
+    return mythread_cond_destroy(cond);
   default:
     return -ENOSYS; /* Unknown method */
   }
