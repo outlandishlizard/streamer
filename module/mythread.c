@@ -13,17 +13,30 @@
 MODULE_LICENSE("GPL");
 
 /*
+ * Implementation of pthreads-compatible mutices and condition variables.
  *
+ * There are several spinlocks in this code: one spinlock for each possible
+ * mutex and one each for each possible cond.  There is exactly one case where
+ * a function will hold two spinlocks: mythread_cond_wait will call
+ * mythread_mutex_lock and mythread_mutex_unlock on the associated mutex.
+ * This cannot cause a deadlock.
  */
 
 struct mythread_mutex {
-  int extant;
+  enum {
+    MUTEX_NEXIST,
+    MUTEX_EXIST,
+    MUTEX_DESTROYING,
+  } state;
   int locked;
   spinlock_t sl;
 };
 
 struct mythread_cond {
-  int extant;
+  enum {
+    COND_NEXIST,
+    COND_EXIST
+  } state;
   wait_queue_head_t queue;
   mythread_mutex_t mutex;
   spinlock_t sl;
@@ -34,196 +47,218 @@ struct mythread_cond {
 #define NUM_CONDS 256
 
 static struct mythread_driver_t {
-  spinlock_t sl;
   struct mythread_mutex mutices[NUM_MUTICES];
-  long num_mutices;
   struct mythread_cond conds[NUM_CONDS];
-  long num_conds;
 } mythread_driver;
 
 
 
 mythread_mutex_t mythread_mutex_init (void) {
-  long mutex;
-  struct mythread_mutex *m;
-  spin_lock(&mythread_driver.sl);
-  mutex = mythread_driver.num_mutices++;
-  if (mutex >= NUM_MUTICES) {
-    return -EAGAIN;
+  long m;
+  struct mythread_mutex *mutex;
+  /* Choose a mutex struct to initialize. */
+  for (m = 0; m < NUM_MUTICES; m++) {
+    mutex = &mythread_driver.mutices[m];
+    spin_lock(&mutex->sl);
+    if (mutex->state != MUTEX_NEXIST) {
+      /* Not available; try next */
+      spin_unlock(&mutex->sl);
+    } else {
+      /* Initialize and return */
+      mutex->state = MUTEX_EXIST;
+      mutex->locked = 0;
+      spin_unlock(&mutex->sl);
+      return m;
+    }
   }
-  m = &mythread_driver.mutices[mutex];
-  m->locked = 0;
-  spin_lock_init(&m->sl);
-  spin_lock(&m->sl);
-  m->extant = 0;
-  spin_unlock(&m->sl);
-  spin_unlock(&mythread_driver.sl);
-  return mutex;
+  /* Out of mutices. */
+  return -EAGAIN;
 }
 
 long mythread_mutex_lock (mythread_mutex_t mutex) {
   struct mythread_mutex *m = &mythread_driver.mutices[mutex];
   spin_lock(&m->sl);
-  if (!m->extant) {
+  /* Check that lock still exists */
+  if (m->state != MUTEX_EXIST) {
     spin_unlock(&m->sl);
     return -EINVAL;
   }
+  /* Wait until unlocked */
   while (m->locked) {
     spin_unlock(&m->sl);
     schedule();
     spin_lock(&m->sl);
-    if (m->extant) {
-      spin_unlock(&m->sl);
-    } else {
+    /* Check that lock still exists */
+    if (m->state != MUTEX_EXIST) {
       spin_unlock(&m->sl);
       return -EINVAL;
     }
   }
-
   /* Grab lock */
   m->locked = 1;
   spin_unlock(&m->sl);
   return 0;
 }
 
+/* This currently lets people unlock OTHER peoples mutices.  This is
+   clearly bad. */
 long mythread_mutex_unlock (mythread_mutex_t mutex) {
   struct mythread_mutex *m = &mythread_driver.mutices[mutex];
   spin_lock(&m->sl);
-  if (!m->extant) {
+  /* Check that lock exists */
+  if (m->state != MUTEX_EXIST) {
     spin_unlock(&m->sl);
     return -EINVAL;
   }
+  /* Check that it's really locked */
   if (!m->locked) {
-    /* This currently lets people unlock OTHER peoples mutices.  This is
-       clearly bad. */
     spin_unlock(&m->sl);
     return -EPERM;
   }
+  /* Unlock it */
   m->locked = 0;
   spin_unlock(&m->sl);
   return 0;
 }
 
+/* This immediately marks the mutex for destruction, and then if it really can
+   destroy it, marks it as destroyed.  In the case where the user tries to
+   destroy a mutex, and then does some operation on it, that operation may
+   fail needlessly.  This could be avoided by having operations on mutices
+   sleep when operating on a mutex in the process of destruction. */
 long mythread_mutex_destroy (mythread_mutex_t mutex) {
   struct mythread_mutex *m = &mythread_driver.mutices[mutex];
   long cond;
-  spin_lock(&mythread_driver.sl);
-  /* Check if active---if so, mark as destroyed */
+  /* Check if mutex exists---if so, mark as destroyed. */
   spin_lock(&m->sl);
-  if (m->extant) {
-    m->extant = 0;
+  if (m->state == MUTEX_EXIST) {
+    m->state = MUTEX_DESTROYING;
     spin_unlock(&m->sl);
   } else {
     spin_unlock(&m->sl);
     return -EINVAL;
   }
-  /* Now check for conds waiting on it */
-  for (cond = 0; cond < mythread_driver.num_conds; cond++) {
+  /* Check that no conds are waiting on it */
+  for (cond = 0; cond < NUM_CONDS; cond++) {
     struct mythread_cond *c = &mythread_driver.conds[cond];
     spin_lock(&c->sl);
-    if (c->extant && c->mutex == mutex && waitqueue_active(&c->queue)) {
+    if (c->state == COND_EXIST &&
+        c->mutex == mutex &&
+        waitqueue_active(&c->queue)) {
       spin_unlock(&c->sl);
-      spin_unlock(&mythread_driver.sl);
-      /* Found an active cond--- don't destroy after all. */
+      /* Found an active cond---don't destroy after all. */
       spin_lock(&m->sl);
-      m->extant = 1;
+      m->state = MUTEX_EXIST;
       spin_unlock(&m->sl);
       return -EBUSY;
+    } else {
+      spin_unlock(&c->sl);
     }
   }
   /* Succeeded---destroyed mutex */
-  spin_unlock(&mythread_driver.sl);
+  spin_lock(&m->sl);
+  m->state = MUTEX_NEXIST;
+  spin_unlock(&m->sl);
   return 0;
 }
 
 mythread_cond_t mythread_cond_init (void) {
-  long cond;
-  struct mythread_cond *c;
-  spin_lock(&mythread_driver.sl);
-  cond = mythread_driver.num_conds++;
-  if (cond >= NUM_CONDS) {
-    return -EAGAIN;
+  long c;
+  struct mythread_cond *cond;
+  for (c = 0; c < NUM_CONDS; c++) {
+    cond = &mythread_driver.conds[c];
+    spin_lock(&cond->sl);
+    if (cond->state == COND_EXIST) {
+      spin_unlock(&cond->sl);
+    } else {
+      /* Initialize and return */
+      cond->state = COND_EXIST;
+      cond->mutex = -1;
+      spin_unlock(&cond->sl);
+      return c;
+    }
   }
-  c = &mythread_driver.conds[cond];
-  spin_lock_init(&c->sl);
-  spin_lock(&c->sl);
-  init_waitqueue_head(&c->queue);
-  c->extant = 0;
-  c->mutex = -1;
-  spin_unlock(&c->sl);
-  spin_unlock(&mythread_driver.sl);
-  return cond;
+  /* Out of conds. */
+  return -EAGAIN;
 }
 
 long mythread_cond_wait (mythread_cond_t cond, mythread_mutex_t mutex) {
   struct mythread_cond *c = &mythread_driver.conds[cond];
   DEFINE_WAIT(__wait);
-
   spin_lock(&c->sl);
-  if (c->extant) {
-    if (c->mutex == -1) {
-      c->mutex = mutex;
-    }
-    if (c->mutex != mutex) {
-      spin_unlock(&c->sl);
-      return -EINVAL;
-    }
-
-    if (mythread_mutex_unlock(mutex)) {
-      spin_unlock(&c->sl);
-      return -EINVAL;
-    }
-
-    prepare_to_wait(&c->queue, &__wait, TASK_INTERRUPTIBLE);
-    spin_unlock(&c->sl);
-    schedule();
-    spin_lock(&c->sl);
-    finish_wait(&c->queue, &__wait);
-    if (mythread_mutex_lock(mutex)) {
-      spin_unlock(&c->sl);
-      printk("<1>mythread: Weird condition when finishing cond wait\n");
-      return 10; /* This really shouldn't happen. */
-    }
-    spin_unlock(&c->sl);
-    return 0;
-  } else {
+  /* Check that cond exists */
+  if (c->state != COND_EXIST) {
     spin_unlock(&c->sl);
     return -EINVAL;
   }
+  if (c->mutex == -1) {
+    /* No mutex associated yet; associate this one */
+    c->mutex = mutex;
+  }
+  if (c->mutex != mutex) {
+    /* Trying to use a new mutex when one associated */
+    spin_unlock(&c->sl);
+    return -EINVAL;
+  }
+  if (mythread_mutex_unlock(mutex)) {
+    /* Error while unlocking; user is doing SOMETHING wrong */
+    spin_unlock(&c->sl);
+    return -EINVAL;
+  }
+  /* Now wait until signalled. */
+  /* TODO FIXME: Check ordering of the following function calls.  Where should
+     I be locking and unlocking the spinlock? */
+  prepare_to_wait(&c->queue, &__wait, TASK_INTERRUPTIBLE);
+  spin_unlock(&c->sl);
+  schedule();
+  spin_lock(&c->sl);
+  finish_wait(&c->queue, &__wait);
+  /* We've been woken up: take lock and return */
+  if (mythread_mutex_lock(mutex)) {
+    spin_unlock(&c->sl);
+    printk("<1>mythread: Weird condition when finishing cond wait\n");
+    return 10; /* This really shouldn't happen. */
+  }
+  spin_unlock(&c->sl);
+  return 0;
 }
 
 long mythread_cond_signal (mythread_cond_t cond) {
   struct mythread_cond *c = &mythread_driver.conds[cond];
   spin_lock(&c->sl);
-  if (c->extant) {
-    wake_up_interruptible(&c->queue);
-    spin_unlock(&c->sl);
-    return 0;
-  } else {
+  /* Check that cond exists */
+  if (c->state != COND_EXIST) {
     spin_unlock(&c->sl);
     return -EINVAL;
   }
+  /* Lock exists: wake up a queued-up task */
+  wake_up_interruptible(&c->queue);
+  spin_unlock(&c->sl);
+  return 0;
 }
 
 long mythread_cond_destroy (mythread_cond_t cond) {
   struct mythread_cond *c = &mythread_driver.conds[cond];
   spin_lock(&c->sl);
-  if (c->extant) {
-    if (waitqueue_active(&c->queue)) {
-      spin_unlock(&c->sl);
-      return -EBUSY;
-    } else {
-      c->extant = 0;
-      spin_unlock(&c->sl);
-      return 0;
-    }
-  } else {
+  /* Check that cond exists */
+  if (c->state != COND_EXIST) {
     spin_unlock(&c->sl);
     return -EINVAL;
   }
-
+  /* Check that no one is waiting on cond */
+  if (waitqueue_active(&c->queue)) {
+    spin_unlock(&c->sl);
+    return -EBUSY;
+  }
+  /* Destroy */
+  c->state = COND_NEXIST;
+  c->mutex = -1;
+  spin_unlock(&c->sl);
+  return 0;
 }
 
+/* Syscall function; dispatches to the various methods above, depending on
+   first argument to syscall */
 asmlinkage long mythread_syscall (enum mythread_op op,
                                   mythread_mutex_t *m,
                                   mythread_cond_t *c) {
@@ -294,9 +329,13 @@ asmlinkage long mythread_syscall (enum mythread_op op,
 
 static int __init init_function (void) {
   void **sys_call_table;
+  mythread_mutex_t m;
+  mythread_cond_t c;
   printk("<1>Hello, World!\n");
   printk("<1>Loading George's Module\n");
-  printk("<1>Inserting syscall...\n");
+  /* Find the location of the required symbols, 'sys_ni_syscall' and
+     'sys_call_table'.  These symbols are not exported, so this kind of
+     hackery is required. */
   if (!kallsyms_lookup_name("sys_ni_syscall")) {
     printk("<1> Couldn't find symbol sys_ni_syscall; won't be able to unload correctly.\n");
     return -1;
@@ -306,14 +345,29 @@ static int __init init_function (void) {
     printk("<1> Couldn't find symbol sys_call_table; can't load correctly.\n");
     return -1;
   }
-  spin_lock_init(&mythread_driver.sl);
-  mythread_driver.num_mutices = 0;
-  mythread_driver.num_conds = 0;
+  /* Initialize driver state */
+  printk("<1>Initializing internal structures...\n");
+  for (m = 0; m < NUM_MUTICES; m++) {
+    struct mythread_mutex *mutex = &mythread_driver.mutices[m];
+    spin_lock_init(&mutex->sl);
+    mutex->state = MUTEX_NEXIST;
+    mutex->locked = 0;
+  }
+  for (c = 0; c < NUM_CONDS; c++) {
+    struct mythread_cond *cond = &mythread_driver.conds[c];
+    spin_lock_init(&cond->sl);
+    cond->state = COND_NEXIST;
+    init_waitqueue_head(&cond->queue);
+    cond->mutex = -1;
+  }
+  /* Insert our system call into the syscall table */
+  printk("<1>Inserting syscall...\n");
   sys_call_table[SYSCALL_HOLE] = mythread_syscall;
   return 0;
 }
 
 static void __exit cleanup_function (void) {
+  /* Find symbols again */
   void *sys_ni_syscall = (void *) kallsyms_lookup_name("sys_ni_syscall");
   void **sys_call_table = (void **) kallsyms_lookup_name("sys_call_table");
   if (!sys_ni_syscall) {
@@ -322,6 +376,7 @@ static void __exit cleanup_function (void) {
   if (!sys_call_table) {
     printk("<1> Couldn't find symbol sys_call_table; can't unload correctly.\n");
   }
+  /* Replace our syscall with the 'not-implemented' syscall */
   printk("<1>Removing syscall...\n");
   sys_call_table[SYSCALL_HOLE] = sys_ni_syscall;
   printk("<1>Goodbye, cruel world.\n");
