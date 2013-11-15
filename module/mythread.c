@@ -129,15 +129,20 @@ long mythread_mutex_unlock (mythread_mutex_t mutex) {
 long mythread_mutex_destroy (mythread_mutex_t mutex) {
   struct mythread_mutex *m = &mythread_driver.mutices[mutex];
   long cond;
-  /* Check if mutex exists---if so, mark as destroyed. */
   spin_lock(&m->sl);
-  if (m->state == MUTEX_EXIST) {
-    m->state = MUTEX_DESTROYING;
-    spin_unlock(&m->sl);
-  } else {
+  /* Check that mutex exists */
+  if (m->state != MUTEX_EXIST) {
     spin_unlock(&m->sl);
     return -EINVAL;
   }
+  /* Check that mutex is not locked */
+  if (m->locked) {
+    spin_unlock(&m->sl);
+    return -EBUSY;
+  }
+  /* Mark mutex for destruction */
+  m->state = MUTEX_DESTROYING;
+  spin_unlock(&m->sl);
   /* Check that no conds are waiting on it */
   for (cond = 0; cond < NUM_CONDS; cond++) {
     struct mythread_cond *c = &mythread_driver.conds[cond];
