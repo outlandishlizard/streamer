@@ -15,7 +15,7 @@ static short debug = 0;
 module_param(debug, short, 0000);
 MODULE_PARM_DESC(debug, "Whether to print debug messages");
 
-#define DEBUG(x) do { if (debug) { printk(KERN_DEBUG "mythread:" x "\n"); } } while (0);
+#define DEBUG(x) do { if (debug) { printk(KERN_DEBUG "mythread: " x "\n"); } } while (0);
 
 /*
  * Implementation of pthreads-compatible mutices and condition variables.
