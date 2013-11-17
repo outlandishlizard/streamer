@@ -49,9 +49,31 @@ struct mythread_cond {
 static struct mythread_driver_t {
   struct mythread_mutex mutices[NUM_MUTICES];
   struct mythread_cond conds[NUM_CONDS];
+  void *old_syscall;
 } mythread_driver;
 
+/* These two functions globally disable and enable the processor's write
+   protection.  This is necessary because the sys_call_table is in write-only
+   memory for obvious security reasons.  But since we are to insert a new
+   syscall, we have to bypass this. */
 
+static void disable_wp (void) {
+  unsigned int cr0_value;
+  __asm__ volatile ("movl %%cr0, %0" : "=r" (cr0_value));
+  /* Disable WP */
+  cr0_value &= ~(1 << 16);
+  __asm__ volatile ("movl %0, %%cr0" :: "r" (cr0_value));
+}
+
+static void enable_wp (void) {
+  unsigned int cr0_value;
+  __asm__ volatile ("movl %%cr0, %0" : "=r" (cr0_value));
+  /* Enable WP */
+  cr0_value |= (1 << 16);
+  __asm__ volatile ("movl %0, %%cr0" :: "r" (cr0_value));
+}
+
+/* Synchronication primitives */
 
 mythread_mutex_t mythread_mutex_init (void) {
   long m;
@@ -333,23 +355,11 @@ asmlinkage long mythread_syscall (enum mythread_op op,
 }
 
 static int __init init_function (void) {
-  void **sys_call_table;
+  void **sys_call_table = (void **) SYSCALL_TABLE;
   mythread_mutex_t m;
   mythread_cond_t c;
   printk("<1>Hello, World!\n");
   printk("<1>Loading George's Module\n");
-  /* Find the location of the required symbols, 'sys_ni_syscall' and
-     'sys_call_table'.  These symbols are not exported, so this kind of
-     hackery is required. */
-  if (!kallsyms_lookup_name("sys_ni_syscall")) {
-    printk("<1> Couldn't find symbol sys_ni_syscall; won't be able to unload correctly.\n");
-    return -1;
-  }
-  sys_call_table = (void **) kallsyms_lookup_name("sys_call_table");
-  if (!sys_call_table) {
-    printk("<1> Couldn't find symbol sys_call_table; can't load correctly.\n");
-    return -1;
-  }
   /* Initialize driver state */
   printk("<1>Initializing internal structures...\n");
   for (m = 0; m < NUM_MUTICES; m++) {
@@ -367,23 +377,20 @@ static int __init init_function (void) {
   }
   /* Insert our system call into the syscall table */
   printk("<1>Inserting syscall...\n");
+  disable_wp();
+  mythread_driver.old_syscall = sys_call_table[SYSCALL_HOLE];
   sys_call_table[SYSCALL_HOLE] = mythread_syscall;
+  enable_wp();
   return 0;
 }
 
 static void __exit cleanup_function (void) {
-  /* Find symbols again */
-  void *sys_ni_syscall = (void *) kallsyms_lookup_name("sys_ni_syscall");
-  void **sys_call_table = (void **) kallsyms_lookup_name("sys_call_table");
-  if (!sys_ni_syscall) {
-    printk("<1> Couldn't find symbol sys_ni_syscall; can't unload correctly.\n");
-  }
-  if (!sys_call_table) {
-    printk("<1> Couldn't find symbol sys_call_table; can't unload correctly.\n");
-  }
+  void **sys_call_table = (void **) SYSCALL_TABLE;
   /* Replace our syscall with the 'not-implemented' syscall */
   printk("<1>Removing syscall...\n");
-  sys_call_table[SYSCALL_HOLE] = sys_ni_syscall;
+  disable_wp();
+  sys_call_table[SYSCALL_HOLE] = mythread_driver.old_syscall;
+  enable_wp();
   printk("<1>Goodbye, cruel world.\n");
 }
 
