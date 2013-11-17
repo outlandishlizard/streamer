@@ -11,6 +11,12 @@
 
 MODULE_LICENSE("GPL");
 
+static short debug = 0;
+module_param(debug, short, 0000);
+MODULE_PARM_DESC(debug, "Whether to print debug messages");
+
+#define DEBUG(x) do { if (debug) { printk(KERN_DEBUG "mythread:" x "\n"); } } while (0);
+
 /*
  * Implementation of pthreads-compatible mutices and condition variables.
  *
@@ -89,10 +95,12 @@ mythread_mutex_t mythread_mutex_init (void) {
       mutex->state = MUTEX_EXIST;
       mutex->locked = 0;
       spin_unlock(&mutex->sl);
+      DEBUG("mutex_init: Success");
       return m;
     }
   }
   /* Out of mutices. */
+  printk(KERN_ERR "mythread: mutex_init: No room for new mutex\n");
   return -EAGAIN;
 }
 
@@ -102,22 +110,26 @@ long mythread_mutex_lock (mythread_mutex_t mutex) {
   /* Check that lock still exists */
   if (m->state != MUTEX_EXIST) {
     spin_unlock(&m->sl);
+    DEBUG("mutex_lock: No such mutex");
     return -EINVAL;
   }
   /* Wait until unlocked */
   while (m->locked) {
     spin_unlock(&m->sl);
+    DEBUG("mutex_lock: Lock already taken.  Waiting...");
     schedule();
     spin_lock(&m->sl);
     /* Check that lock still exists */
     if (m->state != MUTEX_EXIST) {
       spin_unlock(&m->sl);
+      DEBUG("mutex_lock: Disappeared");
       return -EINVAL;
     }
   }
   /* Grab lock */
   m->locked = 1;
   spin_unlock(&m->sl);
+  DEBUG("mutex_lock: Success");
   return 0;
 }
 
@@ -129,16 +141,19 @@ long mythread_mutex_unlock (mythread_mutex_t mutex) {
   /* Check that lock exists */
   if (m->state != MUTEX_EXIST) {
     spin_unlock(&m->sl);
+    DEBUG("mutex_unlock: No such mutex");
     return -EINVAL;
   }
   /* Check that it's really locked */
   if (!m->locked) {
     spin_unlock(&m->sl);
+    DEBUG("mutex_unlock: Not locked");
     return -EPERM;
   }
   /* Unlock it */
   m->locked = 0;
   spin_unlock(&m->sl);
+  DEBUG("mutex_unlock: Success");
   return 0;
 }
 
@@ -150,15 +165,18 @@ long mythread_mutex_unlock (mythread_mutex_t mutex) {
 long mythread_mutex_destroy (mythread_mutex_t mutex) {
   struct mythread_mutex *m = &mythread_driver.mutices[mutex];
   long cond;
+  DEBUG("Attempting to destroy mutex...");
   spin_lock(&m->sl);
   /* Check that mutex exists */
   if (m->state != MUTEX_EXIST) {
     spin_unlock(&m->sl);
+    DEBUG("mutex_destroy: No such mutex");
     return -EINVAL;
   }
   /* Check that mutex is not locked */
   if (m->locked) {
     spin_unlock(&m->sl);
+    DEBUG("mutex_destroy: Mutex locked");
     return -EBUSY;
   }
   /* Mark mutex for destruction */
@@ -176,6 +194,7 @@ long mythread_mutex_destroy (mythread_mutex_t mutex) {
       spin_lock(&m->sl);
       m->state = MUTEX_EXIST;
       spin_unlock(&m->sl);
+      DEBUG("mutex_destroy: Mutex being waited upon");
       return -EBUSY;
     } else {
       spin_unlock(&c->sl);
@@ -185,6 +204,7 @@ long mythread_mutex_destroy (mythread_mutex_t mutex) {
   spin_lock(&m->sl);
   m->state = MUTEX_NEXIST;
   spin_unlock(&m->sl);
+  DEBUG("mutex_destroy: Success");
   return 0;
 }
 
@@ -201,10 +221,12 @@ mythread_cond_t mythread_cond_init (void) {
       cond->state = COND_EXIST;
       cond->mutex = -1;
       spin_unlock(&cond->sl);
+      DEBUG("cond_init: Success");
       return c;
     }
   }
   /* Out of conds. */
+  printk(KERN_ERR "mythread: cond_init: No room for new cond\n");
   return -EAGAIN;
 }
 
@@ -215,20 +237,24 @@ long mythread_cond_wait (mythread_cond_t cond, mythread_mutex_t mutex) {
   /* Check that cond exists */
   if (c->state != COND_EXIST) {
     spin_unlock(&c->sl);
+    DEBUG("cond_wait: No such cond");
     return -EINVAL;
   }
   if (c->mutex == -1) {
     /* No mutex associated yet; associate this one */
+    DEBUG("cond_wait: Associating cond");
     c->mutex = mutex;
   }
   if (c->mutex != mutex) {
     /* Trying to use a new mutex when one associated */
     spin_unlock(&c->sl);
+    DEBUG("cond_wait: Refusing to re-associate cond");
     return -EINVAL;
   }
   if (mythread_mutex_unlock(mutex)) {
     /* Error while unlocking; user is doing SOMETHING wrong */
     spin_unlock(&c->sl);
+    DEBUG("cond_wait: Something wrong");
     return -EINVAL;
   }
   /* Now wait until signalled. */
@@ -236,16 +262,18 @@ long mythread_cond_wait (mythread_cond_t cond, mythread_mutex_t mutex) {
      I be locking and unlocking the spinlock? */
   prepare_to_wait(&c->queue, &__wait, TASK_INTERRUPTIBLE);
   spin_unlock(&c->sl);
+  DEBUG("cond_wait: Waiting...");
   schedule();
   spin_lock(&c->sl);
   finish_wait(&c->queue, &__wait);
   /* We've been woken up: take lock and return */
   if (mythread_mutex_lock(mutex)) {
     spin_unlock(&c->sl);
-    printk(KERN_WARNING "mythread: Weird condition when finishing cond wait\n");
+    printk(KERN_CRIT "mythread: Weird condition when finishing cond wait\n");
     return 10; /* This really shouldn't happen. */
   }
   spin_unlock(&c->sl);
+  DEBUG("cond_wait: Success");
   return 0;
 }
 
@@ -255,11 +283,13 @@ long mythread_cond_signal (mythread_cond_t cond) {
   /* Check that cond exists */
   if (c->state != COND_EXIST) {
     spin_unlock(&c->sl);
+    DEBUG("cond_signal: No such cond");
     return -EINVAL;
   }
   /* Lock exists: wake up a queued-up task */
   wake_up_interruptible(&c->queue);
   spin_unlock(&c->sl);
+  DEBUG("cond_signal: Success");
   return 0;
 }
 
@@ -269,17 +299,20 @@ long mythread_cond_destroy (mythread_cond_t cond) {
   /* Check that cond exists */
   if (c->state != COND_EXIST) {
     spin_unlock(&c->sl);
+    DEBUG("cond_destroy: No such cond");
     return -EINVAL;
   }
   /* Check that no one is waiting on cond */
   if (waitqueue_active(&c->queue)) {
     spin_unlock(&c->sl);
+    DEBUG("cond_destroy: Cond being waited on");
     return -EBUSY;
   }
   /* Destroy */
   c->state = COND_NEXIST;
   c->mutex = -1;
   spin_unlock(&c->sl);
+  DEBUG("cond_destroy: Success");
   return 0;
 }
 
