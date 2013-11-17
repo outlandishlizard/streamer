@@ -4,7 +4,6 @@
 
 #include <asm/uaccess.h>
 #include <linux/linkage.h>
-#include <linux/kallsyms.h>
 #include <linux/wait.h>
 #include <linux/sched.h>
 
@@ -243,7 +242,7 @@ long mythread_cond_wait (mythread_cond_t cond, mythread_mutex_t mutex) {
   /* We've been woken up: take lock and return */
   if (mythread_mutex_lock(mutex)) {
     spin_unlock(&c->sl);
-    printk("<1>mythread: Weird condition when finishing cond wait\n");
+    printk(KERN_WARNING "mythread: Weird condition when finishing cond wait\n");
     return 10; /* This really shouldn't happen. */
   }
   spin_unlock(&c->sl);
@@ -358,10 +357,9 @@ static int __init init_function (void) {
   void **sys_call_table = (void **) SYSCALL_TABLE;
   mythread_mutex_t m;
   mythread_cond_t c;
-  printk("<1>Hello, World!\n");
-  printk("<1>Loading George's Module\n");
+  printk(KERN_INFO "mythread: Hello, World!\n");
   /* Initialize driver state */
-  printk("<1>Initializing internal structures...\n");
+  printk(KERN_INFO "mythread: Initializing internal structures...\n");
   for (m = 0; m < NUM_MUTICES; m++) {
     struct mythread_mutex *mutex = &mythread_driver.mutices[m];
     spin_lock_init(&mutex->sl);
@@ -376,7 +374,7 @@ static int __init init_function (void) {
     cond->mutex = -1;
   }
   /* Insert our system call into the syscall table */
-  printk("<1>Inserting syscall...\n");
+  printk(KERN_INFO "mythread: Inserting syscall...\n");
   disable_wp();
   mythread_driver.old_syscall = sys_call_table[SYSCALL_HOLE];
   sys_call_table[SYSCALL_HOLE] = mythread_syscall;
@@ -387,11 +385,11 @@ static int __init init_function (void) {
 static void __exit cleanup_function (void) {
   void **sys_call_table = (void **) SYSCALL_TABLE;
   /* Replace our syscall with the 'not-implemented' syscall */
-  printk("<1>Removing syscall...\n");
+  printk(KERN_INFO "mythread: Removing syscall...\n");
   disable_wp();
   sys_call_table[SYSCALL_HOLE] = mythread_driver.old_syscall;
   enable_wp();
-  printk("<1>Goodbye, cruel world.\n");
+  printk(KERN_INFO "mythread: Goodbye, cruel world.\n");
 }
 
 
