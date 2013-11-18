@@ -33,6 +33,7 @@ struct mythread_mutex {
     MUTEX_EXIST,
     MUTEX_DESTROYING,
   } state;
+  wait_queue_head_t queue;
   int locked;
   spinlock_t sl;
 };
@@ -106,6 +107,7 @@ mythread_mutex_t mythread_mutex_init (void) {
 
 long mythread_mutex_lock (mythread_mutex_t mutex) {
   struct mythread_mutex *m = &mythread_driver.mutices[mutex];
+  DEFINE_WAIT(__wait);
   spin_lock(&m->sl);
   /* Check that lock still exists */
   if (m->state != MUTEX_EXIST) {
@@ -115,10 +117,12 @@ long mythread_mutex_lock (mythread_mutex_t mutex) {
   }
   /* Wait until unlocked */
   while (m->locked) {
+    prepare_to_wait(&m->queue, &__wait, TASK_INTERRUPTIBLE);
     spin_unlock(&m->sl);
     DEBUG("mutex_lock: Lock already taken.  Waiting...");
     schedule();
     spin_lock(&m->sl);
+    finish_wait(&m->queue, &__wait);
     /* Check that lock still exists */
     if (m->state != MUTEX_EXIST) {
       spin_unlock(&m->sl);
@@ -152,6 +156,7 @@ long mythread_mutex_unlock (mythread_mutex_t mutex) {
   }
   /* Unlock it */
   m->locked = 0;
+  wake_up_interruptible(&m->queue);
   spin_unlock(&m->sl);
   DEBUG("mutex_unlock: Success");
   return 0;
@@ -397,6 +402,7 @@ static int __init init_function (void) {
     struct mythread_mutex *mutex = &mythread_driver.mutices[m];
     spin_lock_init(&mutex->sl);
     mutex->state = MUTEX_NEXIST;
+    init_waitqueue_head(&mutex->queue);
     mutex->locked = 0;
   }
   for (c = 0; c < NUM_CONDS; c++) {
