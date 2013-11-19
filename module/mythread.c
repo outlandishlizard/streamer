@@ -23,8 +23,9 @@ MODULE_PARM_DESC(debug, "Whether to print debug messages");
  * There are several spinlocks in this code: one spinlock for each possible
  * mutex and one each for each possible cond.  There is exactly one case where
  * a function will hold two spinlocks: mythread_cond_wait will call
- * mythread_mutex_lock and mythread_mutex_unlock on the associated mutex.
- * This cannot cause a deadlock.
+ * mythread_mutex_unlock on the associated mutex.  There are no "loops" in
+ * this lock graph, so no deadlocks result.  Furthermore, all code run while
+ * holding a spinlock is O(1) and does not sleep.
  */
 
 struct mythread_mutex {
@@ -117,6 +118,7 @@ long mythread_mutex_lock (mythread_mutex_t mutex) {
   }
   /* Wait until unlocked */
   while (m->locked) {
+    /* Sleep until we're notified that the lock is available. */
     prepare_to_wait(&m->queue, &__wait, TASK_INTERRUPTIBLE);
     spin_unlock(&m->sl);
     DEBUG("mutex_lock: Lock already taken.  Waiting...");
@@ -156,6 +158,7 @@ long mythread_mutex_unlock (mythread_mutex_t mutex) {
   }
   /* Unlock it */
   m->locked = 0;
+  /* Notify any threads waiting on the lock that the lock is available. */
   wake_up_interruptible(&m->queue);
   spin_unlock(&m->sl);
   DEBUG("mutex_unlock: Success");
@@ -216,6 +219,7 @@ long mythread_mutex_destroy (mythread_mutex_t mutex) {
 mythread_cond_t mythread_cond_init (void) {
   long c;
   struct mythread_cond *cond;
+  /* Choose a cond struct to initialize */
   for (c = 0; c < NUM_CONDS; c++) {
     cond = &mythread_driver.conds[c];
     spin_lock(&cond->sl);
@@ -276,8 +280,6 @@ long mythread_cond_wait (mythread_cond_t cond, mythread_mutex_t mutex) {
     return -EINVAL;
   }
   /* Now wait until signalled. */
-  /* TODO FIXME: Check ordering of the following function calls.  Where should
-     I be locking and unlocking the spinlock? */
   prepare_to_wait(&c->queue, &__wait, TASK_INTERRUPTIBLE);
   spin_unlock(&c->sl);
   DEBUG("cond_wait: Waiting...");
