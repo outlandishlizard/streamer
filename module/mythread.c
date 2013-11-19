@@ -271,13 +271,12 @@ long mythread_cond_wait (mythread_cond_t cond, mythread_mutex_t mutex) {
   schedule();
   spin_lock(&c->sl);
   finish_wait(&c->queue, &__wait);
+  spin_unlock(&c->sl);
   /* We've been woken up: take lock and return */
   if (mythread_mutex_lock(mutex)) {
-    spin_unlock(&c->sl);
     printk(KERN_CRIT "mythread: Weird condition when finishing cond wait\n");
     return 10; /* This really shouldn't happen. */
   }
-  spin_unlock(&c->sl);
   DEBUG("cond_wait: Success");
   return 0;
 }
