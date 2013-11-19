@@ -235,6 +235,10 @@ mythread_cond_t mythread_cond_init (void) {
   return -EAGAIN;
 }
 
+/* This is the trickiest primitive in the module.  It is the only one where we
+   ever take a spinlock while holding another spinlock, or (for that matter)
+   where we call another primitive function.  Both calls are documented in
+   detail. */
 long mythread_cond_wait (mythread_cond_t cond, mythread_mutex_t mutex) {
   struct mythread_cond *c = &mythread_driver.conds[cond];
   DEFINE_WAIT(__wait);
@@ -256,6 +260,15 @@ long mythread_cond_wait (mythread_cond_t cond, mythread_mutex_t mutex) {
     DEBUG("cond_wait: Refusing to re-associate cond");
     return -EINVAL;
   }
+  /* Call mythread_mutex_unlock WHILE HOLDING SPINLOCK.  This is safe because
+     that function always completes quickly and never sleeps.  It is necessary
+     because of POSIX's atomicity stipulation: "That is, if another thread is
+     able to acquire the mutex after the about-to-block thread has released
+     it, then a subsequent call to pthread_cond_signal() or
+     pthread_cond_broadcast() in that thread behaves as if it were issued
+     after the about-to-block thread has blocked." (Taken from
+     pthread_cond_wait man page.) Holding the cond's spinlock ensures that no
+     one can access the cond until we put ourselves in the wait_queue. */
   if (mythread_mutex_unlock(mutex)) {
     /* Error while unlocking; user is doing SOMETHING wrong */
     spin_unlock(&c->sl);
@@ -273,6 +286,13 @@ long mythread_cond_wait (mythread_cond_t cond, mythread_mutex_t mutex) {
   finish_wait(&c->queue, &__wait);
   spin_unlock(&c->sl);
   /* We've been woken up: take lock and return */
+  /* Call mythread_mutex_lock WITHOUT HOLDING SPINLOCK.  It is unsafe to hold
+     the spinlock because mythread_mutex_lock can sleep for arbitrary amounts
+     of time.  It is unecessary because POSIX has no particular guarantees
+     about when the woken-up thread gets the lock: "The thread(s) that are
+     unblocked contend for the mutex according to the scheduling policy (if
+     applicable), and as if each had called pthread_mutex_lock()." (Taken from
+     the pthread_cond_signal man page.) */
   if (mythread_mutex_lock(mutex)) {
     printk(KERN_CRIT "mythread: Weird condition when finishing cond wait\n");
     return 10; /* This really shouldn't happen. */
