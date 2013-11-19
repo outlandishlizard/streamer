@@ -106,6 +106,12 @@ mythread_mutex_t mythread_mutex_init (void) {
   return -EAGAIN;
 }
 
+/* When contending for a lock, there is no particular guarantee about what
+   order threads will receive the lock.  It is to some degree FCFS, because of
+   the wait_queue being used, but lucky threads can skip the entire
+   wait_queue.  This could be fixed by checking the wait_queue for habitation
+   and sleeping in it if appropriate. */
+/* This may sleep, and so is neither atomic nor fast. */
 long mythread_mutex_lock (mythread_mutex_t mutex) {
   struct mythread_mutex *m = &mythread_driver.mutices[mutex];
   DEFINE_WAIT(__wait);
@@ -141,6 +147,7 @@ long mythread_mutex_lock (mythread_mutex_t mutex) {
 
 /* This currently lets people unlock OTHER peoples mutices.  This is
    clearly bad. */
+/* Atomic and fast */
 long mythread_mutex_unlock (mythread_mutex_t mutex) {
   struct mythread_mutex *m = &mythread_driver.mutices[mutex];
   spin_lock(&m->sl);
@@ -170,6 +177,8 @@ long mythread_mutex_unlock (mythread_mutex_t mutex) {
    destroy a mutex, and then does some operation on it, that operation may
    fail needlessly.  This could be avoided by having operations on mutices
    sleep when operating on a mutex in the process of destruction. */
+/* This is not atomic, and it is not fast.  (It is O(C), where C is the number
+   of conds.) */
 long mythread_mutex_destroy (mythread_mutex_t mutex) {
   struct mythread_mutex *m = &mythread_driver.mutices[mutex];
   long cond;
@@ -243,6 +252,7 @@ mythread_cond_t mythread_cond_init (void) {
    ever take a spinlock while holding another spinlock, or (for that matter)
    where we call another primitive function.  Both calls are documented in
    detail. */
+/* This sleeps (obviously), and so is neither atomic nor fast */
 long mythread_cond_wait (mythread_cond_t cond, mythread_mutex_t mutex) {
   struct mythread_cond *c = &mythread_driver.conds[cond];
   DEFINE_WAIT(__wait);
@@ -303,6 +313,7 @@ long mythread_cond_wait (mythread_cond_t cond, mythread_mutex_t mutex) {
   return 0;
 }
 
+/* Atomic and fast */
 long mythread_cond_signal (mythread_cond_t cond) {
   struct mythread_cond *c = &mythread_driver.conds[cond];
   spin_lock(&c->sl);
@@ -319,6 +330,7 @@ long mythread_cond_signal (mythread_cond_t cond) {
   return 0;
 }
 
+/* Atomic and fast */
 long mythread_cond_destroy (mythread_cond_t cond) {
   struct mythread_cond *c = &mythread_driver.conds[cond];
   spin_lock(&c->sl);
