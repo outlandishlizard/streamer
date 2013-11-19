@@ -34,8 +34,8 @@ struct monitor_cond {
 struct monitor *monitor_create (void) {
   struct monitor *returnee = (struct monitor *) malloc(sizeof(struct monitor));
 #ifdef USE_MYTHREADS
-  mythread_mutex_init(&returnee->lock);
-  mythread_cond_init(&returnee->queue);
+  mythread_mutex_init(&returnee->lock, NULL);
+  mythread_cond_init(&returnee->queue, NULL);
 #else
   pthread_mutex_init(&returnee->lock, NULL);
   pthread_cond_init(&returnee->queue, NULL);
@@ -47,7 +47,7 @@ struct monitor *monitor_create (void) {
 struct monitor_cond *monitor_cond_create (struct monitor *monitor) {
   struct monitor_cond *returnee = (struct monitor_cond *) malloc(sizeof(struct monitor_cond));
 #ifdef USE_MYTHREADS
-  mythread_cond_init(&returnee->cond);
+  mythread_cond_init(&returnee->cond, NULL);
 #else
   pthread_cond_init(&returnee->cond, NULL);
 #endif
