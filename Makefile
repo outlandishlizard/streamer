@@ -1,4 +1,4 @@
-CFLAGS = -Wall -Wextra -std=c99
+CFLAGS = -Wall -Wextra -std=c99 
 #CFLAGS += -g
 LDFLAGS = $(CFLAGS) -pthread
 
@@ -6,6 +6,8 @@ all: test
 
 #server: monitor.o
 #	gcc -o $@ $^ $(LDFLAGS)
+frame_test	: frame_producer_text.o circular_buffer.o
+	gcc -o $@ $^ $(LDFLAGS)
 
 monitor_test : monitor_test.o monitor.o mythread.o
 	gcc -o $@ $^ $(LDFLAGS)
