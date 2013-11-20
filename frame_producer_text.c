@@ -8,7 +8,8 @@ typedef struct {
     enum {IDLE,WORKING,KILLME} state;
     int name;
     int sockfd;
-    
+ 
+    int resource_fd;   
     pthread_cond_t* buffer_cond;
     pthread_cond_t* tcb_cond;
 
@@ -63,7 +64,7 @@ int text_producer(void* _block)
         frame->priority = block->name;
         frame->text = text_string;
         pthread_mutex_lock(block->buffer_lock);
-        while (circBuff_push(block->buffer,text_string) == 0)
+        while (circBuff_push(block->buffer,frame))
         {
             //The buffer is full, or some other error state, we sleep until it isn't.
             pthread_cond_wait(block->buffer_cond,block->buffer_lock);
@@ -90,7 +91,7 @@ int consume(circBuff* buffer)
         fflush(stdout);
 }
 
-int dispatch(tcb* control,int name,int sockfd)
+int dispatch(tcb* control,int name,int sockfd,int resource_fd)
 {
     if (control->state == WORKING)
     {
@@ -99,9 +100,10 @@ int dispatch(tcb* control,int name,int sockfd)
     control->name   = name;
     control->sockfd = sockfd;
     control->state  = WORKING;
+    control->resource_fd = resource_fd;
     //signal for wakeup on semaphore
     // TODO
-
+    pthread_cond_signal(control->tcb_cond);
     return 1;
 }
 
@@ -111,9 +113,11 @@ void dispatcher(circBuff* buffer,pthread_mutex_t *buffer_lock) {
   // Now empty the buffer into an array for sorting
   // Currently the buffer is of size 100
   int count = 0;
-  void** from_buff = (void**)calloc(buffer->size, sizeof(void*));
+  void** from_buff = (void**)calloc(buffer->size, sizeof(void**));
   while ((from_buff[count] = circBuff_pop(buffer)) != 0){
-      printf("txt:%x\n",((text_frame*)(from_buff[count]))->text);
+     // printf("structure:%p\n",((text_frame*)(from_buff[count])));
+     // printf("txt:%p\n",((text_frame*)(from_buff[count]))->text);
+     // printf("priority:%d\n",((text_frame*)(from_buff[count]))->priority);
       count++;
   }
   printf("Count:%d\n",count); 
@@ -136,8 +140,8 @@ void dispatcher(circBuff* buffer,pthread_mutex_t *buffer_lock) {
  
   // Now send them all
   for (int k=0; k < count; k++) {
-    printf("text location:%x",((text_frame*)from_buff[k])->text);
-    printf("text:%s",((text_frame*)from_buff[k])->text);
+   // printf("text location:%x",((text_frame*)from_buff[k])->text);
+    printf("text:%s\n",((text_frame*)from_buff[k])->text);
     fflush(stdout);  
     //write(i->socket, i->text, strlen(i->text));
     free_text_frame(from_buff[k]);
@@ -145,7 +149,32 @@ void dispatcher(circBuff* buffer,pthread_mutex_t *buffer_lock) {
   free(from_buff);
   printf("Done dispatching\n");
 }
+/*tcb** init_worker_pool(int size)
+{
+    int i = 0;
+    tcb * worker_pool = calloc(size,sizeof(tcb));
+    pthread_cond_t  tcb_conds[size];
+   
+    for (i=0;i<size;i++)
+	{
+        
+        pthread_cond_init(&tcb_conds[i],NULL);
+        worker_pool[i].state    = IDLE;
+        worker_pool[i].name     = i;
+        worker_pool[i].sockfd   = 0;
 
+        worker_pool[i].buffer_cond = &buffer_cond;
+        worker_pool[i].buffer_lock = &buffer_lock;
+        worker_pool[i].tcb_cond = &tcb_conds[i];
+        worker_pool[i].tcb_lock = &tcb_lock;
+        worker_pool[i].buffer   = buffer;
+        
+		
+        pthread_create(producers+i,NULL,text_producer, (void*)(&worker_pool[i]));
+        dispatch(&worker_pool[i],i,0,0);
+    }
+
+}*/
 int main(int argc,char** argv)
 {
     
@@ -183,7 +212,7 @@ int main(int argc,char** argv)
         
 		
         pthread_create(producers+i,NULL,text_producer, (void*)(&worker_pool[i]));
-        dispatch(&worker_pool[i],i,0);
+        dispatch(&worker_pool[i],i,0,0);
     }
     //Dispatcher stub code
     //
