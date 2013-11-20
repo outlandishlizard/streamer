@@ -26,6 +26,12 @@ MODULE_PARM_DESC(debug, "Whether to print debug messages");
  * mythread_mutex_unlock on the associated mutex.  There are no "loops" in
  * this lock graph, so no deadlocks result.  Furthermore, all code run while
  * holding a spinlock is O(1) and does not sleep.
+ *
+ * This module's mutices imitate pthreads "fast" mutices.  That is, there is
+ * no deadlock prevention when attempting to relock an owned mutex; there is
+ * no recursive locking; there is no checking who locked a mutex when
+ * unlocking.
+ *
  */
 
 struct mythread_mutex {
@@ -179,8 +185,6 @@ long mythread_mutex_trylock (mythread_mutex_t mutex) {
   }
 }
 
-/* This currently lets people unlock OTHER peoples mutices.  This is
-   clearly bad. */
 /* Atomic and fast */
 long mythread_mutex_unlock (mythread_mutex_t mutex) {
   struct mythread_mutex *m = &mythread_driver.mutices[mutex];
