@@ -23,6 +23,10 @@ circBuff circBuff_init(int size)
 	buffer.size	= size;
 	return buffer;
 }
+int circBuff_isEmpty(circBuff* buffer)
+{
+    return buffer->read == buffer->write;
+}
 int circBuff_push(circBuff* buffer, void* item)
 {
 	//Invariant: write should never be equal to read if we're full-- it will be if we're EMPTY!
