@@ -2,14 +2,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
-#include <dirent.h>
-#include <limits.h>
-#include <sys/stat.h>
 #include <unistd.h>
-#include <fcntl.h>
 
 #define REQUEST_SIZE 1000
 #define MAX_CLIENTS 1000
@@ -92,9 +87,16 @@ int main(int argc, char* argv[]) {
       if (n < 0)
         error("ERROR reading from socket\n");
       
-      // Respond to the client
+      // Print the request
       printf("From client %d:\n%s\n", i, buffer);
+      
       // DO SHIT
+      // This part of it be difficult
+      // Get the workers, try to find a new one
+      // If there is one, give it the task of this user
+      // If there not be one, make a new one
+      // If there are too many, kill idle ones
+      
       return 0;
     }
     // Close socket?
@@ -104,6 +106,7 @@ int main(int argc, char* argv[]) {
   return 0;
 }
   
+
 
 
 

@@ -4,7 +4,6 @@
 #include "circular_buffer.h"
 
 #define POOL_SIZE 10
-static int nonce=0;
 typedef struct {
     enum {IDLE,WORKING,KILLME} state;
     int name;
@@ -18,6 +17,10 @@ typedef struct {
 
     circBuff* buffer;
 } tcb;
+typedef struct {
+    int priority;
+    char* text;
+} text_frame;
 
 int text_producer(void* _block)
 {
@@ -49,9 +52,11 @@ int text_producer(void* _block)
 
         //Begin actual text production.
         pthread_mutex_lock(block->buffer_lock);
-        char* text_string = (void*)calloc(512,sizeof(char));
-        snprintf(text_string, (size_t)512,"Text Producer %d:%d:%d",block->name,framenum,nonce);
-        nonce++;
+        char* text_string = (char*)calloc(512,sizeof(char));
+        snprintf(text_string, (size_t)512,"Text Producer %d:%d",block->name,framenum);
+        buffer_frame* frame = (buffer_frame*)calloc(1,sizeof(buffer_frame));
+        frame->priority = block->name;
+        frame->text = text_string;
         if (circBuff_push(block->buffer,text_string) == 0)
         {
             //The buffer is full, or some other error state, we sleep until it isn't.
@@ -113,7 +118,7 @@ int main(int argc,char** argv)
     pthread_cond_t  tcb_conds[POOL_SIZE];
 
     int i = 0;
-	for (i=0;i<1;i++)
+	for (i=0;i<POOL_SIZE;i++)
 	{
         pthread_cond_init(&tcb_conds[i],NULL);
         worker_pool[i].state    = IDLE;
