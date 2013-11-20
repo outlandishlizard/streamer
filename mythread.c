@@ -1,7 +1,7 @@
 #include "mythread.h"
 #include "syscall_config.h"
 
-#define _GNU_SOURCE /* Necessary for forward-decalartion of 'syscall' */
+#define _GNU_SOURCE /* Necessary for forward-declaration of 'syscall' */
 #include "unistd.h" /* For 'syscall' function */
 
 int mythread_mutex_init (mythread_mutex_t *m, void __attribute__((unused)) *props) {
