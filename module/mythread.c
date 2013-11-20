@@ -124,7 +124,7 @@ long mythread_mutex_lock (mythread_mutex_t mutex) {
   /* Sanity check array bound */
   if (mutex < 0 || mutex >= NUM_MUTICES) {
     DEBUG("mutex_lock: Bad mutex array index");
-    return -EINVAL
+    return -EINVAL;
   }
   spin_lock(&m->sl);
   /* Check that lock exists */
@@ -162,7 +162,7 @@ long mythread_mutex_trylock (mythread_mutex_t mutex) {
   /* Sanity check array bound */
   if (mutex < 0 || mutex >= NUM_MUTICES) {
     DEBUG("mutex_trylock: Bad mutex array index");
-    return -EINVAL
+    return -EINVAL;
   }
   spin_lock(&m->sl);
   /* Check that lock still exists */
@@ -191,7 +191,7 @@ long mythread_mutex_unlock (mythread_mutex_t mutex) {
   /* Sanity check array bound */
   if (mutex < 0 || mutex >= NUM_MUTICES) {
     DEBUG("mutex_unlock: Bad mutex array index");
-    return -EINVAL
+    return -EINVAL;
   }
   spin_lock(&m->sl);
   /* Check that lock exists */
@@ -228,7 +228,7 @@ long mythread_mutex_destroy (mythread_mutex_t mutex) {
   /* Sanity check array bound */
   if (mutex < 0 || mutex >= NUM_MUTICES) {
     DEBUG("mutex_destroy: Bad mutex array index");
-    return -EINVAL
+    return -EINVAL;
   }
   DEBUG("mutex_destroy: Attempting to destroy mutex...");
   spin_lock(&m->sl);
@@ -307,11 +307,11 @@ long mythread_cond_wait (mythread_cond_t cond, mythread_mutex_t mutex) {
   /* Sanity check array bounds */
   if (cond < 0 || cond >= NUM_CONDS) {
     DEBUG("cond_wait: Bad cond array index");
-    return -EINVAL
+    return -EINVAL;
   }
   if (mutex < 0 || mutex >= NUM_MUTICES) {
     DEBUG("cond_wait: Bad mutex array index");
-    return -EINVAL
+    return -EINVAL;
   }
   spin_lock(&c->sl);
   /* Check that cond exists */
@@ -376,7 +376,7 @@ long mythread_cond_signal (mythread_cond_t cond) {
   /* Sanity check array bound */
   if (cond < 0 || cond >= NUM_CONDS) {
     DEBUG("cond_signal: Bad cond array index");
-    return -EINVAL
+    return -EINVAL;
   }
   spin_lock(&c->sl);
   /* Check that cond exists */
@@ -398,7 +398,7 @@ long mythread_cond_broadcast (mythread_cond_t cond) {
   /* Sanity check array bound */
   if (cond < 0 || cond >= NUM_CONDS) {
     DEBUG("cond_broadcast: Bad cond array index");
-    return -EINVAL
+    return -EINVAL;
   }
   spin_lock(&c->sl);
   /* Check that cond exists */
@@ -420,7 +420,7 @@ long mythread_cond_destroy (mythread_cond_t cond) {
   /* Sanity check array bound */
   if (cond < 0 || cond >= NUM_CONDS) {
     DEBUG("cond_destroy: Bad cond array index");
-    return -EINVAL
+    return -EINVAL;
   }
   spin_lock(&c->sl);
   /* Check that cond exists */
