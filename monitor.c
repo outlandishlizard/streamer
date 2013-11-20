@@ -26,15 +26,25 @@ struct monitor_cond {
 
 struct monitor *monitor_create (void) {
   struct monitor *returnee = (struct monitor *) malloc(sizeof(struct monitor));
-  THREAD(mutex_init)(&returnee->lock, NULL);
-  THREAD(cond_init)(&returnee->queue, NULL);
+  if (THREAD(mutex_init)(&returnee->lock, NULL)) {
+    free(returnee);
+    return NULL;
+  }
+  if (THREAD(cond_init)(&returnee->queue, NULL)) {
+    THREAD(mutex_destroy)(&returnee->lock);
+    free(returnee);
+    return NULL;
+  }
   returnee->waiting = 0;
   return returnee;
 }
 
 struct monitor_cond *monitor_cond_create (struct monitor *monitor) {
   struct monitor_cond *returnee = (struct monitor_cond *) malloc(sizeof(struct monitor_cond));
-  THREAD(cond_init)(&returnee->cond, NULL);
+  if (THREAD(cond_init)(&returnee->cond, NULL)) {
+    free(returnee);
+    return NULL;
+  }
   returnee->waiting = 0;
   returnee->monitor = monitor;
   return returnee;
