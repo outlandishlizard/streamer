@@ -24,12 +24,12 @@ int circBuff_push(circBuff *buffer, void *item)
 	{
 		buffer->base[buffer->write] = item;
 		buffer->write = (buffer->write + 1) % buffer->size;
-		return 1;
+		return 0;
 	}
 
 	else
 	{
-		return 0;
+		return 1;
 	}
 }
 
