@@ -115,8 +115,13 @@ mythread_mutex_t mythread_mutex_init (void) {
 long mythread_mutex_lock (mythread_mutex_t mutex) {
   struct mythread_mutex *m = &mythread_driver.mutices[mutex];
   DEFINE_WAIT(__wait);
+  /* Sanity check array bound */
+  if (mutex < 0 || mutex >= NUM_MUTICES) {
+    DEBUG("mutex_lock: Bad mutex array index");
+    return -EINVAL
+  }
   spin_lock(&m->sl);
-  /* Check that lock still exists */
+  /* Check that lock exists */
   if (m->state != MUTEX_EXIST) {
     spin_unlock(&m->sl);
     DEBUG("mutex_lock: No such mutex");
@@ -148,6 +153,11 @@ long mythread_mutex_lock (mythread_mutex_t mutex) {
 /* Atomic and fast */
 long mythread_mutex_trylock (mythread_mutex_t mutex) {
   struct mythread_mutex *m = &mythread_driver.mutices[mutex];
+  /* Sanity check array bound */
+  if (mutex < 0 || mutex >= NUM_MUTICES) {
+    DEBUG("mutex_trylock: Bad mutex array index");
+    return -EINVAL
+  }
   spin_lock(&m->sl);
   /* Check that lock still exists */
   if (m->state != MUTEX_EXIST) {
@@ -174,6 +184,11 @@ long mythread_mutex_trylock (mythread_mutex_t mutex) {
 /* Atomic and fast */
 long mythread_mutex_unlock (mythread_mutex_t mutex) {
   struct mythread_mutex *m = &mythread_driver.mutices[mutex];
+  /* Sanity check array bound */
+  if (mutex < 0 || mutex >= NUM_MUTICES) {
+    DEBUG("mutex_unlock: Bad mutex array index");
+    return -EINVAL
+  }
   spin_lock(&m->sl);
   /* Check that lock exists */
   if (m->state != MUTEX_EXIST) {
@@ -206,7 +221,12 @@ long mythread_mutex_unlock (mythread_mutex_t mutex) {
 long mythread_mutex_destroy (mythread_mutex_t mutex) {
   struct mythread_mutex *m = &mythread_driver.mutices[mutex];
   long cond;
-  DEBUG("Attempting to destroy mutex...");
+  /* Sanity check array bound */
+  if (mutex < 0 || mutex >= NUM_MUTICES) {
+    DEBUG("mutex_destroy: Bad mutex array index");
+    return -EINVAL
+  }
+  DEBUG("mutex_destroy: Attempting to destroy mutex...");
   spin_lock(&m->sl);
   /* Check that mutex exists */
   if (m->state != MUTEX_EXIST) {
@@ -280,6 +300,15 @@ mythread_cond_t mythread_cond_init (void) {
 long mythread_cond_wait (mythread_cond_t cond, mythread_mutex_t mutex) {
   struct mythread_cond *c = &mythread_driver.conds[cond];
   DEFINE_WAIT(__wait);
+  /* Sanity check array bounds */
+  if (cond < 0 || cond >= NUM_CONDS) {
+    DEBUG("cond_wait: Bad cond array index");
+    return -EINVAL
+  }
+  if (mutex < 0 || mutex >= NUM_MUTICES) {
+    DEBUG("cond_wait: Bad mutex array index");
+    return -EINVAL
+  }
   spin_lock(&c->sl);
   /* Check that cond exists */
   if (c->state != COND_EXIST) {
@@ -340,6 +369,11 @@ long mythread_cond_wait (mythread_cond_t cond, mythread_mutex_t mutex) {
 /* Atomic and fast */
 long mythread_cond_signal (mythread_cond_t cond) {
   struct mythread_cond *c = &mythread_driver.conds[cond];
+  /* Sanity check array bound */
+  if (cond < 0 || cond >= NUM_CONDS) {
+    DEBUG("cond_signal: Bad cond array index");
+    return -EINVAL
+  }
   spin_lock(&c->sl);
   /* Check that cond exists */
   if (c->state != COND_EXIST) {
@@ -357,6 +391,11 @@ long mythread_cond_signal (mythread_cond_t cond) {
 /* Atomic and fast */
 long mythread_cond_broadcast (mythread_cond_t cond) {
   struct mythread_cond *c = &mythread_driver.conds[cond];
+  /* Sanity check array bound */
+  if (cond < 0 || cond >= NUM_CONDS) {
+    DEBUG("cond_broadcast: Bad cond array index");
+    return -EINVAL
+  }
   spin_lock(&c->sl);
   /* Check that cond exists */
   if (c->state != COND_EXIST) {
@@ -374,6 +413,11 @@ long mythread_cond_broadcast (mythread_cond_t cond) {
 /* Atomic and fast */
 long mythread_cond_destroy (mythread_cond_t cond) {
   struct mythread_cond *c = &mythread_driver.conds[cond];
+  /* Sanity check array bound */
+  if (cond < 0 || cond >= NUM_CONDS) {
+    DEBUG("cond_destroy: Bad cond array index");
+    return -EINVAL
+  }
   spin_lock(&c->sl);
   /* Check that cond exists */
   if (c->state != COND_EXIST) {
