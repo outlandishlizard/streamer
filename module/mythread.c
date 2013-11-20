@@ -145,6 +145,31 @@ long mythread_mutex_lock (mythread_mutex_t mutex) {
   return 0;
 }
 
+/* Atomic and fast */
+long mythread_mutex_trylock (mythread_mutex_t mutex) {
+  struct mythread_mutex *m = &mythread_driver.mutices[mutex];
+  DEFINE_WAIT(__wait);
+  spin_lock(&m->sl);
+  /* Check that lock still exists */
+  if (m->state != MUTEX_EXIST) {
+    spin_unlock(&m->sl);
+    DEBUG("mutex_trylock: No such mutex");
+    return -EINVAL;
+  }
+  if (!m->locked) {
+    /* Lock available: Grab lock */
+    m->locked = 1;
+    spin_unlock(&m->sl);
+    DEBUG("mutex_trylock: Success");
+    return 0;
+  } else {
+    /* Lock unavailable: Give up */
+    spin_unlock(&m->sl);
+    DEBUG("mutex_trylock: Lock unavailable");
+    return -EBUSY;
+  }
+}
+
 /* This currently lets people unlock OTHER peoples mutices.  This is
    clearly bad. */
 /* Atomic and fast */
@@ -331,6 +356,23 @@ long mythread_cond_signal (mythread_cond_t cond) {
 }
 
 /* Atomic and fast */
+long mythread_cond_broadcast (mythread_cond_t cond) {
+  struct mythread_cond *c = &mythread_driver.conds[cond];
+  spin_lock(&c->sl);
+  /* Check that cond exists */
+  if (c->state != COND_EXIST) {
+    spin_unlock(&c->sl);
+    DEBUG("cond_broadcsat: No such cond");
+    return -EINVAL;
+  }
+  /* Lock exists: wake up all queued-up tasks */
+  wake_up_interruptible_all(&c->queue);
+  spin_unlock(&c->sl);
+  DEBUG("cond_broadcast: Success");
+  return 0;
+}
+
+/* Atomic and fast */
 long mythread_cond_destroy (mythread_cond_t cond) {
   struct mythread_cond *c = &mythread_driver.conds[cond];
   spin_lock(&c->sl);
@@ -380,6 +422,11 @@ asmlinkage long mythread_syscall (enum mythread_op op,
       return -EINVAL;
     }
     return mythread_mutex_lock(mutex);
+  case MYTHREAD_MUTEX_TRYLOCK:
+    if (copy_from_user(&mutex, m, sizeof(mythread_mutex_t))) {
+      return -EINVAL;
+    }
+    return mythread_mutex_trylock(mutex);
   case MYTHREAD_MUTEX_UNLOCK:
     if (copy_from_user(&mutex, m, sizeof(mythread_mutex_t))) {
       return -EINVAL;
@@ -414,6 +461,11 @@ asmlinkage long mythread_syscall (enum mythread_op op,
       return -EINVAL;
     }
     return mythread_cond_signal(cond);
+  case MYTHREAD_COND_BROADCAST:
+    if (copy_from_user(&cond, c, sizeof(mythread_cond_t))) {
+      return -EINVAL;
+    }
+    return mythread_cond_broadcast(cond);
   case MYTHREAD_COND_DESTROY:
     if (copy_from_user(&cond, c, sizeof(mythread_cond_t))) {
       return -EINVAL;
