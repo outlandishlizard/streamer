@@ -57,26 +57,19 @@ int text_producer(void* _block)
         //Begin actual text production.
        
         char* text_string = (char*)calloc(512,sizeof(char));
-        snprintf(text_string, (size_t)512,"Text Producer %d:%d",block->name,framenum);
+        snprintf(text_string, (size_t)512,"Text Producer %d:%d\0",block->name,framenum);
        
-        text_frame* frame = (text_frame*)calloc(1,sizeof(text_frame));
+        text_frame *frame = (text_frame*)calloc(1,sizeof(text_frame));
         frame->priority = block->name;
         frame->text = text_string;
         pthread_mutex_lock(block->buffer_lock);
-        printf("worker acquired mutex\n"); 
-        fflush(stdout);
         while (circBuff_push(block->buffer,text_string) == 0)
         {
             //The buffer is full, or some other error state, we sleep until it isn't.
             pthread_cond_wait(block->buffer_cond,block->buffer_lock);
         }
-        circBuff_push(block->buffer,text_string);
         framenum++;
-        printf("pthread attempting to release mutex\n");
-        fflush(stdout);
         pthread_mutex_unlock(block->buffer_lock);
-        printf("pthread released mutex\n");
-        fflush(stdout);
     }   
     return framenum;
 
@@ -113,19 +106,17 @@ int dispatch(tcb* control,int name,int sockfd)
 }
 
 void dispatcher(circBuff* buffer,pthread_mutex_t *buffer_lock) {
-  printf("In dispatcher\n");
     // Steal the lock on buffer
   pthread_mutex_lock(buffer_lock);
-  printf("Dispatcher has lock\n");
- fflush(stdout); 
   // Now empty the buffer into an array for sorting
   // Currently the buffer is of size 100
   int count = 0;
   void** from_buff = (void**)calloc(buffer->size, sizeof(void*));
-  while ((from_buff[count] = circBuff_pop(buffer)) != 0){count++;};
-  
-  printf("Count:%d\n",count);
-  fflush(stdout);
+  while ((from_buff[count] = circBuff_pop(buffer)) != 0){
+      printf("txt:%x\n",((text_frame*)(from_buff[count]))->text);
+      count++;
+  }
+  printf("Count:%d\n",count); 
   // Release the lock
   pthread_mutex_unlock(buffer_lock);
   // Now sort it
@@ -143,24 +134,24 @@ void dispatcher(circBuff* buffer,pthread_mutex_t *buffer_lock) {
     }
   }
  
-  printf("Past sorted\n");
-  fflush(stdout);
   // Now send them all
   for (int k=0; k < count; k++) {
+    printf("text location:%x",((text_frame*)from_buff[k])->text);
     printf("text:%s",((text_frame*)from_buff[k])->text);
-    fflush(stdin);  
+    fflush(stdout);  
     //write(i->socket, i->text, strlen(i->text));
     free_text_frame(from_buff[k]);
   }
   free(from_buff);
   printf("Done dispatching\n");
-  fflush(stdout);
 }
 
 int main(int argc,char** argv)
 {
     
     pthread_mutex_t buffer_lock;
+    pthread_mutex_init(&buffer_lock,NULL);
+    
     pthread_cond_t  buffer_cond;
     pthread_cond_init(&buffer_cond,NULL);
 
@@ -173,6 +164,7 @@ int main(int argc,char** argv)
     tcb worker_pool[POOL_SIZE];
 
     pthread_mutex_t tcb_lock;
+    pthread_mutex_init(&buffer_lock,NULL);
     pthread_cond_t  tcb_conds[POOL_SIZE];
 
     int i = 0;
