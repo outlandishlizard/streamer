@@ -145,6 +145,31 @@ long mythread_mutex_lock (mythread_mutex_t mutex) {
   return 0;
 }
 
+/* Atomic and fast */
+long mythread_mutex_trylock (mythread_mutex_t mutex) {
+  struct mythread_mutex *m = &mythread_driver.mutices[mutex];
+  DEFINE_WAIT(__wait);
+  spin_lock(&m->sl);
+  /* Check that lock still exists */
+  if (m->state != MUTEX_EXIST) {
+    spin_unlock(&m->sl);
+    DEBUG("mutex_trylock: No such mutex");
+    return -EINVAL;
+  }
+  if (!m->locked) {
+    /* Lock available: Grab lock */
+    m->locked = 1;
+    spin_unlock(&m->sl);
+    DEBUG("mutex_trylock: Success");
+    return 0;
+  } else {
+    /* Lock unavailable: Give up */
+    spin_unlock(&m->sl);
+    DEBUG("mutex_trylock: Lock unavailable");
+    return -EBUSY;
+  }
+}
+
 /* This currently lets people unlock OTHER peoples mutices.  This is
    clearly bad. */
 /* Atomic and fast */
@@ -397,6 +422,11 @@ asmlinkage long mythread_syscall (enum mythread_op op,
       return -EINVAL;
     }
     return mythread_mutex_lock(mutex);
+  case MYTHREAD_MUTEX_TRYLOCK:
+    if (copy_from_user(&mutex, m, sizeof(mythread_mutex_t))) {
+      return -EINVAL;
+    }
+    return mythread_mutex_trylock(mutex);
   case MYTHREAD_MUTEX_UNLOCK:
     if (copy_from_user(&mutex, m, sizeof(mythread_mutex_t))) {
       return -EINVAL;

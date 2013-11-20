@@ -6,6 +6,7 @@
 int mythread_mutex_init (mythread_mutex_t *, void *);
 int mythread_mutex_destroy (mythread_mutex_t *);
 int mythread_mutex_lock (mythread_mutex_t *);
+int mythread_mutex_trylock (mythread_mutex_t *);
 int mythread_mutex_unlock (mythread_mutex_t *);
 
 int mythread_cond_init (mythread_cond_t *, void *);
