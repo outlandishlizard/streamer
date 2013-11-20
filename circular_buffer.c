@@ -43,7 +43,8 @@ int* circBuff_pop(circBuff *buffer)
 	else
 	{
         printf("Write:%d Read%d\n",buffer->write,buffer->read);
-		int *ret;
+        fflush(stdout);
+        int *ret;
 		ret = buffer->base[buffer->read];
 		buffer->read = (((buffer->read)+1) % (buffer->size));
 		return ret;
