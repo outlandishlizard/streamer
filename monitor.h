@@ -18,8 +18,6 @@ struct monitor_cond;
  * call 'monitor_run_fn' themselves.  They may wait on and signal conditions
  * associated with the monitor, with 'monitor_cond_wait' and
  * 'monitor_cond_signal'.
- *
- * It is unsafe to manipulate condition variables from outside the monitor.
  */
 
 struct monitor *monitor_create (void);

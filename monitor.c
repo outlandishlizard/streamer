@@ -81,15 +81,12 @@ void monitor_cond_wait (struct monitor_cond *c) {
   c->waiting--;
 }
 
-/* Caller must own monitor mutex */
+/* Caller need not own monitor mutex */
 void monitor_cond_signal (struct monitor_cond *c) {
-  if (c->waiting) {
-    /* Queue up another thread */
-    THREAD(cond_signal)(&c->cond);
-    /* Wait */
-    c->monitor->waiting++;
-    THREAD(cond_wait)(&c->monitor->queue, &c->monitor->lock);
-    c->monitor->waiting--;
-  }
-  /* If no threads waiting on c, do nothing at all. */
+  THREAD(cond_signal)(&c->cond);
+}
+
+/* Caller need not own monitor mutex */
+void monitor_cond_broadcast (struct monitor_cond *c) {
+  THREAD(cond_broadcast)(&c->cond);
 }

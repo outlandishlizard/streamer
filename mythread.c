@@ -36,3 +36,6 @@ int mythread_cond_signal (mythread_cond_t *c) {
   return syscall(SYSCALL_HOLE, MYTHREAD_COND_SIGNAL, NULL, c);
 }
 
+int mythread_cond_broadcast (mythread_cond_t *c) {
+  return syscall(SYSCALL_HOLE, MYTHREAD_COND_BROADCAST, NULL, c);
+}

@@ -331,6 +331,23 @@ long mythread_cond_signal (mythread_cond_t cond) {
 }
 
 /* Atomic and fast */
+long mythread_cond_broadcast (mythread_cond_t cond) {
+  struct mythread_cond *c = &mythread_driver.conds[cond];
+  spin_lock(&c->sl);
+  /* Check that cond exists */
+  if (c->state != COND_EXIST) {
+    spin_unlock(&c->sl);
+    DEBUG("cond_broadcsat: No such cond");
+    return -EINVAL;
+  }
+  /* Lock exists: wake up all queued-up tasks */
+  wake_up_interruptible_all(&c->queue);
+  spin_unlock(&c->sl);
+  DEBUG("cond_broadcast: Success");
+  return 0;
+}
+
+/* Atomic and fast */
 long mythread_cond_destroy (mythread_cond_t cond) {
   struct mythread_cond *c = &mythread_driver.conds[cond];
   spin_lock(&c->sl);
@@ -414,6 +431,11 @@ asmlinkage long mythread_syscall (enum mythread_op op,
       return -EINVAL;
     }
     return mythread_cond_signal(cond);
+  case MYTHREAD_COND_BROADCAST:
+    if (copy_from_user(&cond, c, sizeof(mythread_cond_t))) {
+      return -EINVAL;
+    }
+    return mythread_cond_broadcast(cond);
   case MYTHREAD_COND_DESTROY:
     if (copy_from_user(&cond, c, sizeof(mythread_cond_t))) {
       return -EINVAL;
