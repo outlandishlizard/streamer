@@ -1,10 +1,12 @@
 #include <pthread.h>
-#include <circular_buffer.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include "circular_buffer.h"
 
 #define POOL_SIZE 10
-
-typedef struct{
-    typedef enum {IDLE,WORKING,KILLME} state;
+static int nonce=0;
+typedef struct {
+    enum {IDLE,WORKING,KILLME} state;
     int name;
     int sockfd;
     
@@ -42,17 +44,20 @@ int text_producer(void* _block)
                 printf("pthread_cond_wait failed in text_producer, error code:%d",err);
                 return 0;
             }
+            pthread_mutex_unlock(block->tcb_lock);
         }
 
         //Begin actual text production.
         pthread_mutex_lock(block->buffer_lock);
-        char text_string[512];
-        snprintf(text_string, (size_t)512,"Text Producer %d:%d",block->name,framenum);
-        while (!circBuff_push(block->buffer,text_string))
+        char* text_string = (void*)calloc(512,sizeof(char));
+        snprintf(text_string, (size_t)512,"Text Producer %d:%d:%d",block->name,framenum,nonce);
+        nonce++;
+        if (circBuff_push(block->buffer,text_string) == 0)
         {
             //The buffer is full, or some other error state, we sleep until it isn't.
             pthread_cond_wait(block->buffer_cond,block->buffer_lock);
         }
+        circBuff_push(block->buffer,text_string);
         framenum++;
         pthread_mutex_unlock(block->buffer_lock);
     }   
@@ -61,12 +66,23 @@ int text_producer(void* _block)
 }
 int consume(circBuff* buffer)
 {
-    printf("Popped:%s",circBuff_pop(buffer));
+    char* pop;
+    pop = circBuff_pop(buffer);
+    printf("Pop addr:%x\n",pop);
+    if (pop)
+    {
+        printf("Popped:%s\n",pop);
+    }
+    else
+    {
+        printf("Pop failed\n");
+    }
+        fflush(stdin);
 }
 
 int dispatch(tcb* control,int name,int sockfd)
 {
-    if (tcb->state == WORKING)
+    if (control->state == WORKING)
     {
         return 0;
     }
@@ -83,12 +99,13 @@ int main(int argc,char** argv)
     
     pthread_mutex_t buffer_lock;
     pthread_cond_t  buffer_cond;
-    pthread_cond_init(buffer_cond,NULL);
+    pthread_cond_init(&buffer_cond,NULL);
 
 
-    circBuff buffer;
-	buffer = circBuff_init(100);
-	
+    circBuff* buffer;
+    buffer = circBuff_init(100);
+
+
     pthread_t producers[POOL_SIZE];
     tcb worker_pool[POOL_SIZE];
 
@@ -96,34 +113,36 @@ int main(int argc,char** argv)
     pthread_cond_t  tcb_conds[POOL_SIZE];
 
     int i = 0;
-	for (i=0;i<POOL_SIZE;i++)
+	for (i=0;i<1;i++)
 	{
-        pthread_cond_init(tcb_conds[i],NULL);
+        pthread_cond_init(&tcb_conds[i],NULL);
         worker_pool[i].state    = IDLE;
         worker_pool[i].name     = i;
         worker_pool[i].sockfd   = 0;
 
-        worker_pool[i].buffer_cond = buffer_cond;
-        worker_pool[i].buffer_lock = buffer_lock;
-        worker_pool[i].tcb_cond = tcb_conds[i];
-        worker_pool[i].tcb_lock = tcb_lock;
-
-		pthread_create(producers+i,NULL,text_producer, (void*)(&worker_pool[i]));
-	}
+        worker_pool[i].buffer_cond = &buffer_cond;
+        worker_pool[i].buffer_lock = &buffer_lock;
+        worker_pool[i].tcb_cond = &tcb_conds[i];
+        worker_pool[i].tcb_lock = &tcb_lock;
+        worker_pool[i].buffer   = buffer;
+        
+		
+        pthread_create(producers+i,NULL,text_producer, (void*)(&worker_pool[i]));
+        dispatch(&worker_pool[i],i,0);
+    }
     //Dispatcher stub code
     //
     while(1)
     {
-        pthread_mutex_lock(buffer_lock);
+        pthread_mutex_lock(&buffer_lock);
         if (!circBuff_isEmpty(buffer))
         {
             consume(buffer);        
         }
         else
         {
-            pthread_cond_broadcast(buffer_cond);
+                pthread_cond_broadcast(&buffer_cond); 
         }
-        pthread_mutex_unlock(buffer_lock);
-
+        pthread_mutex_unlock(&buffer_lock);
     }
 }
