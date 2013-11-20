@@ -148,7 +148,6 @@ long mythread_mutex_lock (mythread_mutex_t mutex) {
 /* Atomic and fast */
 long mythread_mutex_trylock (mythread_mutex_t mutex) {
   struct mythread_mutex *m = &mythread_driver.mutices[mutex];
-  DEFINE_WAIT(__wait);
   spin_lock(&m->sl);
   /* Check that lock still exists */
   if (m->state != MUTEX_EXIST) {
