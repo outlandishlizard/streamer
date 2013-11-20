@@ -6,22 +6,6 @@
 
 #define buff_size 100
 
-typedef struct {
-        int socket;
-        int priority;
-        char* text;
-
-} text_producer_job;
-
-typedef struct {
-        int* base;
-        int size;
-        int read;
-        int write;
-
-} circBuff;
-
-
 void dispatcher(circBuff* buffer) {
   // Steal the lock on buffer
   pthread_mutex_lock(buffer_lock);
@@ -49,7 +33,7 @@ void dispatcher(circBuff* buffer) {
   
   // Now send them all
   for (int k=0; k < count; k++) {
-    write(i->socket, i->text, strlen(i->text));
+    //write(i->socket, i->text, strlen(i->text));
   }
   free(from_buff);
 }
