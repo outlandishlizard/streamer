@@ -15,7 +15,7 @@ static short debug = 0;
 module_param(debug, short, 0000);
 MODULE_PARM_DESC(debug, "Whether to print debug messages");
 
-#define DEBUG(x) do { if (debug) { printk(KERN_DEBUG "mythread: " x "\n"); } } while (0);
+#define DEBUG(x) do { if (debug) { printk(KERN_DEBUG "mythread: " x "\n"); } } while (0)
 
 /*
  * Implementation of pthreads-compatible mutices and condition variables.
@@ -23,8 +23,9 @@ MODULE_PARM_DESC(debug, "Whether to print debug messages");
  * There are several spinlocks in this code: one spinlock for each possible
  * mutex and one each for each possible cond.  There is exactly one case where
  * a function will hold two spinlocks: mythread_cond_wait will call
- * mythread_mutex_lock and mythread_mutex_unlock on the associated mutex.
- * This cannot cause a deadlock.
+ * mythread_mutex_unlock on the associated mutex.  There are no "loops" in
+ * this lock graph, so no deadlocks result.  Furthermore, all code run while
+ * holding a spinlock is O(1) and does not sleep.
  */
 
 struct mythread_mutex {
@@ -105,6 +106,12 @@ mythread_mutex_t mythread_mutex_init (void) {
   return -EAGAIN;
 }
 
+/* When contending for a lock, there is no particular guarantee about what
+   order threads will receive the lock.  It is to some degree FCFS, because of
+   the wait_queue being used, but lucky threads can skip the entire
+   wait_queue.  This could be fixed by checking the wait_queue for habitation
+   and sleeping in it if appropriate. */
+/* This may sleep, and so is neither atomic nor fast. */
 long mythread_mutex_lock (mythread_mutex_t mutex) {
   struct mythread_mutex *m = &mythread_driver.mutices[mutex];
   DEFINE_WAIT(__wait);
@@ -117,6 +124,7 @@ long mythread_mutex_lock (mythread_mutex_t mutex) {
   }
   /* Wait until unlocked */
   while (m->locked) {
+    /* Sleep until we're notified that the lock is available. */
     prepare_to_wait(&m->queue, &__wait, TASK_INTERRUPTIBLE);
     spin_unlock(&m->sl);
     DEBUG("mutex_lock: Lock already taken.  Waiting...");
@@ -139,6 +147,7 @@ long mythread_mutex_lock (mythread_mutex_t mutex) {
 
 /* This currently lets people unlock OTHER peoples mutices.  This is
    clearly bad. */
+/* Atomic and fast */
 long mythread_mutex_unlock (mythread_mutex_t mutex) {
   struct mythread_mutex *m = &mythread_driver.mutices[mutex];
   spin_lock(&m->sl);
@@ -156,6 +165,7 @@ long mythread_mutex_unlock (mythread_mutex_t mutex) {
   }
   /* Unlock it */
   m->locked = 0;
+  /* Notify any threads waiting on the lock that the lock is available. */
   wake_up_interruptible(&m->queue);
   spin_unlock(&m->sl);
   DEBUG("mutex_unlock: Success");
@@ -167,6 +177,8 @@ long mythread_mutex_unlock (mythread_mutex_t mutex) {
    destroy a mutex, and then does some operation on it, that operation may
    fail needlessly.  This could be avoided by having operations on mutices
    sleep when operating on a mutex in the process of destruction. */
+/* This is not atomic, and it is not fast.  (It is O(C), where C is the number
+   of conds.) */
 long mythread_mutex_destroy (mythread_mutex_t mutex) {
   struct mythread_mutex *m = &mythread_driver.mutices[mutex];
   long cond;
@@ -216,6 +228,7 @@ long mythread_mutex_destroy (mythread_mutex_t mutex) {
 mythread_cond_t mythread_cond_init (void) {
   long c;
   struct mythread_cond *cond;
+  /* Choose a cond struct to initialize */
   for (c = 0; c < NUM_CONDS; c++) {
     cond = &mythread_driver.conds[c];
     spin_lock(&cond->sl);
@@ -235,6 +248,11 @@ mythread_cond_t mythread_cond_init (void) {
   return -EAGAIN;
 }
 
+/* This is the trickiest primitive in the module.  It is the only one where we
+   ever take a spinlock while holding another spinlock, or (for that matter)
+   where we call another primitive function.  Both calls are documented in
+   detail. */
+/* This sleeps (obviously), and so is neither atomic nor fast */
 long mythread_cond_wait (mythread_cond_t cond, mythread_mutex_t mutex) {
   struct mythread_cond *c = &mythread_driver.conds[cond];
   DEFINE_WAIT(__wait);
@@ -256,6 +274,15 @@ long mythread_cond_wait (mythread_cond_t cond, mythread_mutex_t mutex) {
     DEBUG("cond_wait: Refusing to re-associate cond");
     return -EINVAL;
   }
+  /* Call mythread_mutex_unlock WHILE HOLDING SPINLOCK.  This is safe because
+     that function always completes quickly and never sleeps.  It is necessary
+     because of POSIX's atomicity stipulation: "That is, if another thread is
+     able to acquire the mutex after the about-to-block thread has released
+     it, then a subsequent call to pthread_cond_signal() or
+     pthread_cond_broadcast() in that thread behaves as if it were issued
+     after the about-to-block thread has blocked." (Taken from
+     pthread_cond_wait man page.) Holding the cond's spinlock ensures that no
+     one can access the cond until we put ourselves in the wait_queue. */
   if (mythread_mutex_unlock(mutex)) {
     /* Error while unlocking; user is doing SOMETHING wrong */
     spin_unlock(&c->sl);
@@ -263,25 +290,30 @@ long mythread_cond_wait (mythread_cond_t cond, mythread_mutex_t mutex) {
     return -EINVAL;
   }
   /* Now wait until signalled. */
-  /* TODO FIXME: Check ordering of the following function calls.  Where should
-     I be locking and unlocking the spinlock? */
   prepare_to_wait(&c->queue, &__wait, TASK_INTERRUPTIBLE);
   spin_unlock(&c->sl);
   DEBUG("cond_wait: Waiting...");
   schedule();
   spin_lock(&c->sl);
   finish_wait(&c->queue, &__wait);
+  spin_unlock(&c->sl);
   /* We've been woken up: take lock and return */
+  /* Call mythread_mutex_lock WITHOUT HOLDING SPINLOCK.  It is unsafe to hold
+     the spinlock because mythread_mutex_lock can sleep for arbitrary amounts
+     of time.  It is unecessary because POSIX has no particular guarantees
+     about when the woken-up thread gets the lock: "The thread(s) that are
+     unblocked contend for the mutex according to the scheduling policy (if
+     applicable), and as if each had called pthread_mutex_lock()." (Taken from
+     the pthread_cond_signal man page.) */
   if (mythread_mutex_lock(mutex)) {
-    spin_unlock(&c->sl);
     printk(KERN_CRIT "mythread: Weird condition when finishing cond wait\n");
     return 10; /* This really shouldn't happen. */
   }
-  spin_unlock(&c->sl);
   DEBUG("cond_wait: Success");
   return 0;
 }
 
+/* Atomic and fast */
 long mythread_cond_signal (mythread_cond_t cond) {
   struct mythread_cond *c = &mythread_driver.conds[cond];
   spin_lock(&c->sl);
@@ -298,6 +330,7 @@ long mythread_cond_signal (mythread_cond_t cond) {
   return 0;
 }
 
+/* Atomic and fast */
 long mythread_cond_destroy (mythread_cond_t cond) {
   struct mythread_cond *c = &mythread_driver.conds[cond];
   spin_lock(&c->sl);

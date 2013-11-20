@@ -4,7 +4,7 @@
 #define _GNU_SOURCE /* Necessary for forward-decalartion of 'syscall' */
 #include "unistd.h" /* For 'syscall' function */
 
-int mythread_mutex_init (mythread_mutex_t *m) {
+int mythread_mutex_init (mythread_mutex_t *m, void __attribute__((unused)) *props) {
   return syscall(SYSCALL_HOLE, MYTHREAD_MUTEX_INIT, m, NULL);
 }
 
@@ -20,7 +20,7 @@ int mythread_mutex_unlock (mythread_mutex_t *m) {
   return syscall(SYSCALL_HOLE, MYTHREAD_MUTEX_UNLOCK, m, NULL);
 }
 
-int mythread_cond_init (mythread_cond_t *c) {
+int mythread_cond_init (mythread_cond_t *c, void __attribute__((unused)) *props) {
   return syscall(SYSCALL_HOLE, MYTHREAD_COND_INIT, NULL, c);
 }
 
