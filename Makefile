@@ -1,14 +1,17 @@
 CFLAGS = -Wall -Wextra -std=c99
 #CFLAGS += -g
-LDFLAGS = $(CFLAGS) -pthreads
+LDFLAGS = $(CFLAGS) -pthread
 
-#all: server
+all: test
 
 #server: monitor.o
 #	gcc -o $@ $^ $(LDFLAGS)
+
+monitor_test : monitor_test.o monitor.o mythread.o
+	gcc -o $@ $^ $(LDFLAGS)
 
 %.o : %.c
 	gcc -c -o $@ $^ $(CFLAGS)
 
 clean:
-	rm -f *.o
+	rm -f *.o monitor_test
