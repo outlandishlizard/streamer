@@ -113,12 +113,12 @@ int dispatch(tcb* control,int name,int sockfd,int resource_fd)
     control->resource_fd = resource_fd;
     //signal for wakeup on semaphore
     // TODO
-    printf("tcb:%p,%d,%d,%d\n",control,name,sockfd,resource_fd);
-    printf("cond:%p\n",control->tcb_cond);
-    printf("buffer:%p\n",control->buffer);
+  //  printf("dtcb:%p,%d,%d,%d\n",control,name,sockfd,resource_fd);
+  //  printf("dcond:%p\n",control->tcb_cond);
+  //  printf("dbuffer:%p\n",control->buffer);
     pthread_cond_signal(control->tcb_cond);
-    printf("Got past signal\n");
-    fflush(stdout);    
+  //  printf("Got past signal\n");
+  //  fflush(stdout);    
     return 1;
 }
 worker_pool *initialize_workers(void *task,int size,circBuff* buffer,pthread_mutex_t *buffer_lock, pthread_mutex_t *tcb_lock, pthread_cond_t *buffer_cond)
@@ -170,9 +170,9 @@ int assign_worker(worker_pool *pool, int name, int sockfd, int resource_fd)
     {
         return 1;
     }
-   // pthread_mutex_lock(pool->tcb_lock);
-    dispatch(&((pool->workers)[i]),name,sockfd,resource_fd);
-   // pthread_mutex_unlock(pool->tcb_lock);
+    pthread_mutex_lock(pool->tcb_lock);
+    dispatch((pool->workers)[i],name,sockfd,resource_fd);
+    pthread_mutex_unlock(pool->tcb_lock);
     return 0;
 }
 int pool_grow(worker_pool *pool)
@@ -292,7 +292,11 @@ int main(int argc,char** argv)
     int i;
     for (i =0;i<POOL_SIZE;i++)
     {
-        printf("field:%p\n",((pool->workers)[i])->buffer);
+       // printf("tcb out:%p\n",((pool->workers)[i]));
+       // printf("buffer:%p\n",((pool->workers)[i])->buffer);
+       // printf("buffercond::%p\n",((pool->workers)[i])->buffer_cond);
+       // printf("tcblock:%p\n",((pool->workers)[i])->tcb_lock);
+       // printf("tcbcond:%p\n",((pool->workers)[i])->tcb_cond);
         assign_worker(pool,i,0,0);
     }
 
