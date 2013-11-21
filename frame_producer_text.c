@@ -5,20 +5,14 @@
 
 #define POOL_SIZE 10
 typedef struct {
-    pthread_t *thread;
+    pthread_t thread;
 
     enum {IDLE,WORKING,KILLME} state;
     int name;
     int sockfd;
- 
     int resource_fd;   
-    pthread_cond_t* buffer_cond;
-    pthread_cond_t* tcb_cond;
 
-    pthread_mutex_t* buffer_lock;
-    pthread_mutex_t* tcb_lock;
-
-    circBuff* buffer;
+    pthread_cond_t tcb_cond;
 } tcb;
 
 typedef struct {
@@ -26,11 +20,18 @@ typedef struct {
     char* text;
 } text_frame;
 
-typedef struct {
-    tcb** workers;
+struct {
+    tcb **workers;
     int size;
-    pthread_mutex_t* tcb_lock;
+    pthread_mutex_t lock;
 } worker_pool;
+
+struct {
+  circBuff *cb;
+  pthread_cond_t producer_cond;
+  pthread_cond_t consumer_cond;
+  pthread_mutex_t lock;
+} circular_buffer;
 
 void free_text_frame(text_frame *tf)
 {
@@ -54,15 +55,15 @@ int text_producer(void* _block)
         //Check that we're in a state that we should be in, block until we are.
         while (block->state != WORKING)
         {
-            pthread_mutex_lock(block->tcb_lock);
+            pthread_mutex_lock(&worker_pool.lock);
             
             int err;        
-            if (err = pthread_cond_wait(block->tcb_cond,block->tcb_lock))
+            if (err = pthread_cond_wait(&block->tcb_cond, &worker_pool.lock))
             {
                 printf("pthread_cond_wait failed in text_producer, error code:%d",err);
                 return 0;
             }
-            pthread_mutex_unlock(block->tcb_lock);
+            pthread_mutex_unlock(&worker_pool.lock);
         }
 
         //Begin actual text production.
@@ -73,14 +74,14 @@ int text_producer(void* _block)
         text_frame *frame = (text_frame*)calloc(1,sizeof(text_frame));
         frame->priority = block->name;
         frame->text = text_string;
-        pthread_mutex_lock(block->buffer_lock);
-        while (circBuff_push(block->buffer,frame))
+        pthread_mutex_lock(&circular_buffer.lock);
+        while (circBuff_push(circular_buffer.cb,frame))
         {
             //The buffer is full, or some other error state, we sleep until it isn't.
-            pthread_cond_wait(block->buffer_cond,block->buffer_lock);
+            pthread_cond_wait(&circular_buffer.producer_cond, &circular_buffer.lock);
         }
         framenum++;
-        pthread_mutex_unlock(block->buffer_lock);
+        pthread_mutex_unlock(&circular_buffer.lock);
     }   
     return framenum;
 
@@ -99,13 +100,14 @@ int consume(circBuff* buffer)
         printf("Pop failed\n");
     }
         fflush(stdout);
+        return 0;
 }
 
 int dispatch(tcb* control,int name,int sockfd,int resource_fd)
 {
     if (control->state == WORKING)
     {
-        return 0;
+        return 1;
     }
     control->name   = name;
     control->sockfd = sockfd;
@@ -116,39 +118,30 @@ int dispatch(tcb* control,int name,int sockfd,int resource_fd)
   //  printf("dtcb:%p,%d,%d,%d\n",control,name,sockfd,resource_fd);
   //  printf("dcond:%p\n",control->tcb_cond);
   //  printf("dbuffer:%p\n",control->buffer);
-    pthread_cond_signal(control->tcb_cond);
+    pthread_cond_signal(&control->tcb_cond);
   //  printf("Got past signal\n");
   //  fflush(stdout);    
-    return 1;
+    return 0;
 }
-worker_pool *initialize_workers(void *task,int size,circBuff* buffer,pthread_mutex_t *buffer_lock, pthread_mutex_t *tcb_lock, pthread_cond_t *buffer_cond)
+int initialize_worker_pool(void *task, int size)
 {
-    worker_pool *pool   = calloc(1,sizeof(worker_pool));
-    pool->workers       = calloc(size,sizeof(tcb**));
-    pool->size          = size;
-    pool->tcb_lock      = tcb_lock;
+    worker_pool.workers   = calloc(size,sizeof(tcb**));
+    worker_pool.size      = size;
+    pthread_mutex_init(&worker_pool.lock, NULL);
     int i =0;
     for (i=0;i<size;i++)
     {
         tcb* worker = calloc(1,sizeof(tcb));
-        (pool->workers)[i] = worker;
+        worker_pool.workers[i] = worker;
 
         worker->state        = IDLE;
-        worker->tcb_lock     = tcb_lock;
-        worker->buffer_lock  = buffer_lock;
-        worker->buffer_cond  = buffer_cond;
 
-        worker->buffer       = buffer;
-
-        worker->tcb_cond     = calloc(1,sizeof(pthread_cond_t));
-        worker->thread       = calloc(1,sizeof(pthread_t));
-
-        pthread_cond_init(worker->tcb_cond,NULL);
-        pthread_create(worker->thread,NULL,task,(void*)worker);
+        pthread_cond_init(&worker->tcb_cond, NULL);
+        pthread_create(&worker->thread, NULL, task, (void *)worker);
     }
-    return pool;
+    return 0;
 }
-int assign_worker(worker_pool *pool, int name, int sockfd, int resource_fd)
+int assign_worker (int name, int sockfd, int resource_fd)
 {
     //Assigns a worker to the job specified by the arguments from pool; assumes
     //pool is not full. From a synchronization standpoint, it would also be
@@ -158,30 +151,30 @@ int assign_worker(worker_pool *pool, int name, int sockfd, int resource_fd)
     //our attempt.
 
     int i = 0;
-    for (i = 0 ; i< pool->size; i++)
+    for (i = 0 ; i< worker_pool.size; i++)
     {
-        if ((pool->workers)[i]->state == IDLE)
+        if (worker_pool.workers[i]->state == IDLE)
         {
             break;
         }
     }
     
-    if (i == pool->size)
+    if (i == worker_pool.size)
     {
         return 1;
     }
-    pthread_mutex_lock(pool->tcb_lock);
-    dispatch((pool->workers)[i],name,sockfd,resource_fd);
-    pthread_mutex_unlock(pool->tcb_lock);
+    pthread_mutex_lock(&worker_pool.lock);
+    dispatch(worker_pool.workers[i], name, sockfd, resource_fd);
+    pthread_mutex_unlock(&worker_pool.lock);
     return 0;
 }
-int pool_grow(worker_pool *pool)
+int pool_grow (void)
 {
     int newmem;
-    if (newmem = realloc(pool->workers,(2 * pool->size * sizeof(tcb*))))
+    if (newmem = realloc(worker_pool.workers, (2 * worker_pool.size * sizeof(tcb *))))
     {
-        pool->size *= 2;
-        pool->workers= newmem;
+        worker_pool.size *= 2;
+        worker_pool.workers = newmem;
     }
     else
     {
@@ -189,29 +182,29 @@ int pool_grow(worker_pool *pool)
     }
     return 0;
 }
-worker_pool *pool_shrink(worker_pool *pool)
+int pool_shrink (void)
 {
     //Not implemented yet, if ever.
     return 1;
 }
 
-void dispatcher(circBuff* buffer,pthread_mutex_t *buffer_lock,pthread_cond_t *buffer_cond) {
+void dispatcher (void) {
     // Steal the lock on buffer
-  pthread_mutex_lock(buffer_lock);
+  pthread_mutex_lock(&circular_buffer.lock);
   // Now empty the buffer into an array for sorting
   // Currently the buffer is of size 100
   int count = 0;
-  void** from_buff = (void**)calloc(buffer->size, sizeof(void**));
-  while ((from_buff[count] = circBuff_pop(buffer)) != 0){
+  void **from_buff = (void **) calloc(circular_buffer.cb->size, sizeof(void **));
+  while ((from_buff[count] = circBuff_pop(circular_buffer.cb)) != 0){
      // printf("structure:%p\n",((text_frame*)(from_buff[count])));
      // printf("txt:%p\n",((text_frame*)(from_buff[count]))->text);
      // printf("priority:%d\n",((text_frame*)(from_buff[count]))->priority);
       count++;
   }
-  printf("Count:%d\n",count); 
+  printf("Count:%d\n", count);
   // Release the lock
-  pthread_cond_broadcast(buffer_cond);
-  pthread_mutex_unlock(buffer_lock);
+  pthread_cond_broadcast(&circular_buffer.producer_cond);
+  pthread_mutex_unlock(&circular_buffer.lock);
   // Now sort it
   // Bubblesort FTW
   for (int c=0 ; c < count; c++) {
@@ -267,37 +260,28 @@ void dispatcher(circBuff* buffer,pthread_mutex_t *buffer_lock,pthread_cond_t *bu
 int main(int argc,char** argv)
 {
     
-    pthread_mutex_t buffer_lock;
-    pthread_mutex_init(&buffer_lock,NULL);
-    
-    pthread_cond_t  buffer_cond;
-    pthread_cond_init(&buffer_cond,NULL);
-
-
-    circBuff* buffer;
-    buffer = circBuff_init(100);
-
+    pthread_mutex_init(&circular_buffer.lock,NULL);
+    pthread_cond_init(&circular_buffer.producer_cond, NULL);
+    pthread_cond_init(&circular_buffer.consumer_cond, NULL);
+    circular_buffer.cb = circBuff_init(100);
 
 //    pthread_t producers[POOL_SIZE];
 //    tcb worker_pool[POOL_SIZE];
 
-    pthread_mutex_t tcb_lock;
-    pthread_mutex_init(&tcb_lock,NULL);
-    
-    worker_pool* pool; 
-    
-    pthread_mutex_lock(&tcb_lock);
-    pool = initialize_workers(text_producer,POOL_SIZE,buffer, &buffer_lock, &tcb_lock,&buffer_cond);
-    pthread_mutex_unlock(&tcb_lock);
+    pthread_mutex_init(&worker_pool.lock,NULL);
+    pthread_mutex_lock(&worker_pool.lock);
+    initialize_worker_pool(text_producer,POOL_SIZE);
+    pthread_mutex_unlock(&worker_pool.lock);
+
     int i;
-    for (i =0;i<POOL_SIZE;i++)
+    for (i = 0; i < POOL_SIZE; i++)
     {
        // printf("tcb out:%p\n",((pool->workers)[i]));
        // printf("buffer:%p\n",((pool->workers)[i])->buffer);
        // printf("buffercond::%p\n",((pool->workers)[i])->buffer_cond);
        // printf("tcblock:%p\n",((pool->workers)[i])->tcb_lock);
        // printf("tcbcond:%p\n",((pool->workers)[i])->tcb_cond);
-        assign_worker(pool,i,0,0);
+        assign_worker(i, 0, 0);
     }
 
     /*    pthread_cond_t  tcb_conds[POOL_SIZE];
@@ -334,7 +318,7 @@ int main(int argc,char** argv)
         }
         pthread_mutex_unlock(&buffer_lock);
    */
-        dispatcher(buffer,&buffer_lock,&buffer_cond);
+        dispatcher();
         sleep(1);
     }
 }
