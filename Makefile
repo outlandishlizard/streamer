@@ -16,4 +16,4 @@ monitor_test : monitor_test.o monitor.o mythread.o
 	gcc -c -o $@ $^ $(CFLAGS)
 
 clean:
-	rm -f *.o monitor_test
+	rm -f *.o monitor_test frame_test
