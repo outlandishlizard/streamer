@@ -61,9 +61,10 @@ void monitor_cond_destroy (struct monitor_cond *c) {
   free(c);
 }
 
-void monitor_run_fn (struct monitor *m,
-                     void (*f)(void *),
-                     void *user_data) {
+void *monitor_run_fn (struct monitor *m,
+                      void *(*f)(void *),
+                      void *user_data) {
+  void *returnee;
   /* Grab lock, and enter monitor */
   THREAD(mutex_lock)(&m->lock);
   if (m->waiting) {
@@ -75,10 +76,11 @@ void monitor_run_fn (struct monitor *m,
   }
   /* Else, no threads trying to execute now; skip the wait to avoid
      deadlock */
-  f(user_data);
+  returnee = f(user_data);
   /* Leave monitor, and signal another waiting thread to execute */
   THREAD(cond_signal)(&m->queue);
   THREAD(mutex_unlock)(&m->lock);
+  return returnee;
 }
 
 /* Caller must own monitor mutex */
