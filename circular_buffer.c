@@ -17,6 +17,11 @@ int circBuff_isEmpty(circBuff *buffer)
 {
     return buffer->read == buffer->write;
 }
+int circBuff_isOne(circBuff *buffer)
+{
+    return (buffer->read+1)%(buffer->size) == buffer->write % buffer->size;
+}
+
 int circBuff_push(circBuff *buffer, void *item)
 {
 	//Invariant: write should never be equal to read if we're full-- it will be if we're EMPTY!
