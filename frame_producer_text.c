@@ -1,6 +1,7 @@
 #include <pthread.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <unistd.h>
 #include "circular_buffer.h"
 
 #define POOL_SIZE 10
@@ -57,8 +58,8 @@ int text_producer(void* _block)
         {
             pthread_mutex_lock(&worker_pool.lock);
             
-            int err;        
-            if (err = pthread_cond_wait(&block->tcb_cond, &worker_pool.lock))
+            int err = pthread_cond_wait(&block->tcb_cond, &worker_pool.lock);
+            if (err)
             {
                 printf("pthread_cond_wait failed in text_producer, error code:%d",err);
                 return 0;
@@ -69,7 +70,7 @@ int text_producer(void* _block)
         //Begin actual text production.
        
         char* text_string = (char*)calloc(512,sizeof(char));
-        snprintf(text_string, (size_t)512,"Text Producer %d:%d\0",block->name,framenum);
+        snprintf(text_string, (size_t)512,"Text Producer %d:%d",block->name,framenum);
        
         text_frame *frame = (text_frame*)calloc(1,sizeof(text_frame));
         frame->priority = block->name;
@@ -86,6 +87,7 @@ int text_producer(void* _block)
     return framenum;
 
 }
+/*
 int consume(circBuff* buffer)
 {
     char* pop;
@@ -102,7 +104,7 @@ int consume(circBuff* buffer)
         fflush(stdout);
         return 0;
 }
-
+*/
 int dispatch(tcb* control,int name,int sockfd,int resource_fd)
 {
     if (control->state == WORKING)
@@ -170,8 +172,8 @@ int assign_worker (int name, int sockfd, int resource_fd)
 }
 int pool_grow (void)
 {
-    int newmem;
-    if (newmem = realloc(worker_pool.workers, (2 * worker_pool.size * sizeof(tcb *))))
+    tcb **newmem = realloc(worker_pool.workers, (2 * worker_pool.size * sizeof(tcb *)));
+    if (newmem)
     {
         worker_pool.size *= 2;
         worker_pool.workers = newmem;
@@ -257,7 +259,7 @@ void dispatcher (void) {
     }
 
 }*/
-int main(int argc,char** argv)
+int main (void)
 {
     
     pthread_mutex_init(&circular_buffer.lock,NULL);
