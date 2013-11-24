@@ -1,12 +1,13 @@
 #include <pthread.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <unistd.h>
 #include "circular_buffer.h"
 #include "server.h"
 
 #define POOL_SIZE 10
 typedef struct {
-    pthread_t thread;
+    pthread_t *thread;
 
     enum {IDLE,WORKING,KILLME,UNINITIALIZED} state;
     int name;
@@ -82,13 +83,9 @@ int text_producer(void* _block)
         //Check that we're in a state that we should be in, block until we are.
         while (block->state != WORKING)
         {
-            printf("State != WORKING, attempting to grab worker_pool.lock\n");
             pthread_mutex_lock(&worker_pool.lock);
-            printf("State != WORKING, grabbed worker_pool.lock\n");
-             
-            int err;
-            printf("About to wait on cond at:%p\n",&block->tcb_cond);        
-            if (err = pthread_cond_wait(&block->tcb_cond, &worker_pool.lock))
+            int err = pthread_cond_wait(block->tcb_cond, &worker_pool.lock);
+            if (err)
             {
                 printf("pthread_cond_wait failed in text_producer, error code:%d",err);
                 return 0;
@@ -99,7 +96,7 @@ int text_producer(void* _block)
         //Begin actual text production.
         printf("started working!\n"); 
         char* text_string = (char*)calloc(512,sizeof(char));
-        snprintf(text_string, (size_t)512,"Text Producer %d:%d\0",block->name,framenum);
+        snprintf(text_string, (size_t)512,"Text Producer %d:%d",block->name,framenum);
        
         text_frame *frame = (text_frame*)calloc(1,sizeof(text_frame));
         frame->priority = block->name;
@@ -123,6 +120,7 @@ int text_producer(void* _block)
     return framenum;
 
 }
+/*
 int consume(circBuff* buffer)
 {
     char* pop;
@@ -138,7 +136,7 @@ int consume(circBuff* buffer)
         fflush(stdout);
         return 0;
 }
-
+*/
 int dispatch(tcb* control,int name,int sockfd,int resource_fd)
 {
     if (control->state == WORKING)
@@ -246,8 +244,8 @@ int assign_worker (int name, int sockfd, int resource_fd)
 }
 int pool_grow (void)
 {
-    int newmem;
-    if (newmem = realloc(worker_pool.workers, (2 * worker_pool.size * sizeof(tcb *))))
+    tcb **newmem = realloc(worker_pool.workers, (2 * worker_pool.size * sizeof(tcb *)));
+    if (newmem)
     {
         worker_pool.workers= newmem;
         int i=0;
@@ -327,12 +325,10 @@ void dispatcher_transmit(flat_buffer* flat_buff) {
   free(from_buff);
   free(flat_buff);
 }
-
+/*
 int server_thread(void* args) {
   //8080 is the default port, the user can change this at runtime though
   int PORT = (int)args;
-  int MAX_CLIENTS=100;
-  int REQUEST_SIZE=1024; 
   int server_socket = make_server_socket(PORT);
   
   // Start accepting clients, forking for each new one
@@ -378,10 +374,10 @@ int server_thread(void* args) {
   close(server_socket);
   return 0;
 }
+*/
 
 
-
-int main(int argc,char** argv)
+int main (void)
 {
     
     //Begin initializing global locks and conds
@@ -419,13 +415,13 @@ int main(int argc,char** argv)
 
 
 
-/*    int i;
+    int i;
     
     for (i = 0; i < POOL_SIZE; i++)
     {
         assign_worker(i,0,0);
     }
-*//*
+/*
         dispatch_arg *disp_args = calloc(1,sizeof(dispatch_arg));
         disp_args->buffer = buffer;
         disp_args->buffer_lock  = &buffer_lock;

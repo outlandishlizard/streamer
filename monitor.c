@@ -20,7 +20,6 @@ struct monitor {
 
 struct monitor_cond {
   THREAD(cond_t) cond;
-  int waiting;
   struct monitor *monitor;
 };
 
@@ -45,7 +44,6 @@ struct monitor_cond *monitor_cond_create (struct monitor *monitor) {
     free(returnee);
     return NULL;
   }
-  returnee->waiting = 0;
   returnee->monitor = monitor;
   return returnee;
 }
@@ -88,9 +86,7 @@ void monitor_cond_wait (struct monitor_cond *c) {
   /* Queue up another thread */
   THREAD(cond_signal)(&c->monitor->queue);
   /* Wait */
-  c->waiting++;
   THREAD(cond_wait)(&c->cond, &c->monitor->lock);
-  c->waiting--;
 }
 
 /* Caller need not own monitor mutex */
