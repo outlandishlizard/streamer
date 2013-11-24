@@ -7,6 +7,7 @@
 #include "server.h"
 
 #define POOL_SIZE 10
+
 typedef struct {
     pthread_t *thread;
 
@@ -23,6 +24,34 @@ typedef struct {
     circBuff *buffer;
 } tcb;
 
+
+struct {
+    tcb **workers;
+    int size;
+    pthread_mutex_t lock;
+    void* task;
+} worker_pool;
+
+struct {
+  circBuff *cb;
+  pthread_cond_t producer_cond;
+  pthread_cond_t consumer_cond;
+  pthread_mutex_t lock;
+} circular_buffer;
+
+
+typedef struct {
+    int priority;
+    tcb* owner;
+    char* text;
+} text_frame;
+
+typedef struct {
+    void ** from_buff;
+    int length;
+} flat_buffer;
+
+
 void tcb_cleanup(tcb* block)
 {
     block->name         = 0;
@@ -32,39 +61,11 @@ void tcb_cleanup(tcb* block)
     return;
 }
 
-
-typedef struct {
-    int priority;
-    tcb* owner;
-    char* text;
-} text_frame;
-
-struct {
-    tcb **workers;
-    int size;
-    pthread_mutex_t lock;
-    void* task;
-} worker_pool;
-
-
-typedef struct {
-    void ** from_buff;
-    int length;
-} flat_buffer;
-
-struct {
-  circBuff *cb;
-  pthread_cond_t producer_cond;
-  pthread_cond_t consumer_cond;
-  pthread_mutex_t lock;
-} circular_buffer;
-
 void free_text_frame(text_frame *tf)
 {
     free(tf->text);
     free(tf);
 }
-
 
 int text_producer(void* _block)
 {
