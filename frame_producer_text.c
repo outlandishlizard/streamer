@@ -1,4 +1,5 @@
 #include <pthread.h>
+#include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -24,6 +25,7 @@ typedef struct {
 
 typedef struct {
     int priority;
+    int dest_sockfd;
     char* text;
 } text_frame;
 
@@ -101,6 +103,7 @@ int text_producer(void* _block)
         text_frame *frame = (text_frame*)calloc(1,sizeof(text_frame));
         frame->priority = block->name;
         frame->text = text_string;
+        frame->dest_sockfd = block->sockfd;
         pthread_mutex_lock(&circular_buffer.lock);
         printf("In worker, got circbuff lock, waiting on cond\n");
         while (circBuff_push(circular_buffer.cb,frame))
@@ -317,23 +320,26 @@ void dispatcher_transmit(flat_buffer* flat_buff) {
   // Now send them all
   void **from_buff = flat_buff->from_buff; 
   for (int k=0; k < flat_buff->length; k++) {
-    printf("text:%s\n",((text_frame*)from_buff[k])->text);
-    fflush(stdout);  
+    int frame_sockfd = ((text_frame*)from_buff[k])->dest_sockfd;
+    char* frame_text = ((text_frame*)from_buff[k])->text;
+    send(frame_sockfd, frame_text, strlen(frame_text),MSG_DONTWAIT|MSG_NOSIGNAL);
+    //printf("text:%s\n",((text_frame*)from_buff[k])->text);
+    //fflush(stdout);  
     //write(i->socket, i->text, strlen(i->text));
     free_text_frame(from_buff[k]);
   }
   free(from_buff);
   free(flat_buff);
 }
-/*
+
 int server_thread(void* args) {
   //8080 is the default port, the user can change this at runtime though
-  int PORT = (int)args;
+  int PORT = *(int*)args;
   int server_socket = make_server_socket(PORT);
   
   // Start accepting clients, forking for each new one
-  int i;
-  for(i=0; i<MAX_CLIENTS; i++) {
+  int i=0;
+  while(1) {
     
     int client_socket = get_client(server_socket);
     if (client_socket < 0) {
@@ -341,13 +347,13 @@ int server_thread(void* args) {
       continue;
     }
     
-    printf("Another client accepted for a total of %d\n", i+1);
+    printf("Another client accepted for a total of %d\n", ++i);
     
     // Fork a process for handling the request
     // Will later change this to giving to a thread
     // Parent just continues the loop, wainting for another client
-    
-    if(fork() == 0) {
+    assign_worker(i,client_socket,0);
+    /*if(fork() == 0) {
       // Read a request from the client
       char buffer[REQUEST_SIZE];
       bzero(buffer, REQUEST_SIZE);
@@ -367,14 +373,14 @@ int server_thread(void* args) {
       // If there are too many, kill idle ones
       
       return 0;
-    }
+    }*/
     // Close socket?
   }
   // The main loop is over, so close the socket and finish up
   close(server_socket);
   return 0;
 }
-*/
+
 
 
 int main (void)
@@ -417,10 +423,10 @@ int main (void)
 
     int i;
     
-    for (i = 0; i < POOL_SIZE; i++)
+/*    for (i = 0; i < POOL_SIZE; i++)
     {
         assign_worker(i,0,0);
-    }
+    }*/
 /*
         dispatch_arg *disp_args = calloc(1,sizeof(dispatch_arg));
         disp_args->buffer = buffer;
@@ -429,7 +435,13 @@ int main (void)
         disp_args->buffer_empty_cond = &buffer_empty_cond;
 */
         pthread_t disp_thread;
+        pthread_t serv_thread;
+
+        int port = 8080;
+
         pthread_create(&disp_thread,NULL,dispatcher_thread,(void*)0);
+        pthread_create(&serv_thread,NULL,server_thread,(void*)&port);
+
         while(1)
         {
             sleep(1000);

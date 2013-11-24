@@ -13,7 +13,7 @@
 
 void error(char* msg) {
   printf("%s", msg);
-  exit(1);
+//  exit(1);
 }
 
 
@@ -56,7 +56,7 @@ int get_client(int server_socket) {
   return accept(server_socket, (struct sockaddr *) &cli_addr, &clilen);
 }
 
-
+/*
 int main(int argc, char* argv[]) {
   //8080 is the default port, the user can change this at runtime though
   int PORT = (argc == 2) ? atoi(argv[1]) : 8080;
@@ -105,7 +105,7 @@ int main(int argc, char* argv[]) {
   close(server_socket);
   return 0;
 }
-  
+  */
 
 
 
