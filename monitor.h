@@ -1,8 +1,26 @@
 #ifndef __MONITOR_H
 #define __MONITOR_H
 
-struct monitor;
-struct monitor_cond;
+#include "global_config.h"
+
+#ifdef USE_MYTHREADS
+# include "mythread.h"
+# define THREAD(ID)  mythread_ ## ID
+#else
+# include <pthread.h>
+# define THREAD(ID) pthread_ ## ID
+#endif
+
+struct monitor {
+  THREAD(mutex_t) lock;
+  THREAD(cond_t) queue;
+  int waiting;
+};
+
+struct monitor_cond {
+  THREAD(cond_t) cond;
+  struct monitor *monitor;
+};
 
 /*
  * This is an implementation of Hoare-style blocking monitors.
@@ -20,8 +38,8 @@ struct monitor_cond;
  * 'monitor_cond_signal'.
  */
 
-struct monitor *monitor_create (void);
-struct monitor_cond *monitor_cond_create (struct monitor *monitor);
+int monitor_init (struct monitor *m);
+int monitor_cond_init (struct monitor_cond *c, struct monitor *monitor);
 void monitor_destroy (struct monitor *m);
 void monitor_cond_destroy (struct monitor_cond *c);
 void *monitor_run_fn (struct monitor *m,

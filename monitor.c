@@ -1,51 +1,28 @@
-#include "global_config.h"
-#ifdef USE_MYTHREADS
-# include "mythread.h"
-# define THREAD(ID)  mythread_ ## ID
-#else
-# include <pthread.h>
-# define THREAD(ID) pthread_ ## ID
-#endif
 #include <stdlib.h>
+#include "global_config.h"
 #include "monitor.h"
 
 /* All variables in the monitor, as well as in any associated monitor_cond,
    may be modified ONLY by a thread holding the monitor's 'lock' mutex. */
 
-struct monitor {
-  THREAD(mutex_t) lock;
-  THREAD(cond_t) queue;
-  int waiting;
-};
-
-struct monitor_cond {
-  THREAD(cond_t) cond;
-  struct monitor *monitor;
-};
-
-struct monitor *monitor_create (void) {
-  struct monitor *returnee = (struct monitor *) malloc(sizeof(struct monitor));
-  if (THREAD(mutex_init)(&returnee->lock, NULL)) {
-    free(returnee);
-    return NULL;
+int monitor_init (struct monitor *m) {
+  if (THREAD(mutex_init)(&m->lock, NULL)) {
+    return -1;
   }
-  if (THREAD(cond_init)(&returnee->queue, NULL)) {
-    THREAD(mutex_destroy)(&returnee->lock);
-    free(returnee);
-    return NULL;
+  if (THREAD(cond_init)(&m->queue, NULL)) {
+    THREAD(mutex_destroy)(&m->lock);
+    return -1;
   }
-  returnee->waiting = 0;
-  return returnee;
+  m->waiting = 0;
+  return 0;
 }
 
-struct monitor_cond *monitor_cond_create (struct monitor *monitor) {
-  struct monitor_cond *returnee = (struct monitor_cond *) malloc(sizeof(struct monitor_cond));
-  if (THREAD(cond_init)(&returnee->cond, NULL)) {
-    free(returnee);
-    return NULL;
+int monitor_cond_init (struct monitor_cond *c, struct monitor *monitor) {
+  if (THREAD(cond_init)(&c->cond, NULL)) {
+    return -1;
   }
-  returnee->monitor = monitor;
-  return returnee;
+  c->monitor = monitor;
+  return 0;
 }
 
 void monitor_destroy (struct monitor *m) {
