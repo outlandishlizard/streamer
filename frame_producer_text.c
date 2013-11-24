@@ -51,18 +51,7 @@ typedef struct {
     void ** from_buff;
     int length;
 } flat_buffer;
-/*
-typedef struct {
-    circBuff *buffer;
-    void*   producer_func;
-    pthread_mutex_t *buffer_lock;
-    pthread_mutex_t *tcb_lock;
-    pthread_cond_t  *buffer_cond;
-    pthread_cond_t  *buffer_empty_cond;
-} global_data
 
-static global_data globals;
-*/
 struct {
   circBuff *cb;
   pthread_cond_t producer_cond;
@@ -136,23 +125,7 @@ int text_producer(void* _block)
     return framenum;
 
 }
-/*
-int consume(circBuff* buffer)
-{
-    char* pop;
-    pop = circBuff_pop(buffer);
-    if (pop)
-    {
-        printf("Popped:%s\n",pop);
-    }
-    else
-    {
-        printf("Pop failed\n");
-    }
-        fflush(stdout);
-        return 0;
-}
-*/
+
 int dispatch(tcb* control,int name,int sockfd,int resource_fd)
 {
     if (control->state == WORKING)
@@ -170,29 +143,12 @@ int dispatch(tcb* control,int name,int sockfd,int resource_fd)
     pthread_cond_signal(control->tcb_cond);
     return 1;
 }
-/*
-worker_pool *create_worker_pool(int size)
-{
-    //TODO refactor initialize_workers into this and an actual initializer function so we can use intialize_workers after we dynamically get more workers.
-    worker_pool *pool   = calloc(1,sizeof(worker_pool));
-    pool->workers       = calloc(size,sizeof(tcb**));
-    pool->size          = size;
-    pool->tcb_lock      = tcb_lock;
-    int i=0;
-    for (i=0;i<size;i++)
-    {
-        tcb* worker         = calloc(1,sizeof(tcb));
-        (pool->workers)[i]  = worker;
-        worker->state       = UNINITIALIZED;
-    }
-    return pool;
-}*/
+
 int create_worker_pool(void *task, int size)
 {
     worker_pool.workers = calloc(size,sizeof(tcb**));
     worker_pool.size    = size;
     worker_pool.task    = task;
-    //pthread_mutex_init(&worker_pool.lock, NULL);
     int i =0;
     for (i=0;i<size;i++)
     {
@@ -200,12 +156,10 @@ int create_worker_pool(void *task, int size)
         worker_pool.workers[i] = worker;
 
         worker->state        = UNINITIALIZED;
-
-    //    pthread_cond_init(&worker->tcb_cond, NULL);
-      //  pthread_create(&worker->thread, NULL, task, (void *)worker);
     }
     return 0;
 }
+
 void initialize_workers()
 {
     int i =0;
@@ -278,6 +232,7 @@ int pool_grow (void)
     }
     return 0;
 }
+
 int pool_shrink (void)
 {
     //Not implemented yet, if ever.
@@ -286,20 +241,18 @@ int pool_shrink (void)
 
 flat_buffer* dispatcher_copybuffer()
 {
-while (circBuff_isEmpty(circular_buffer.cb))
-        {
-            printf("in copybuffer, buffer empty, waiting on consumer_cond\n");
-            int err;        
-            if (err = pthread_cond_wait(&circular_buffer.consumer_cond,&circular_buffer.lock))
-            {
-                printf("pthread_cond_wait failed in dispatcher, error code:%d",err);
-                return 0;
-            }
-        }
-        printf("in copybuffer, finished waiting.\n");
+  while (circBuff_isEmpty(circular_buffer.cb)) {
+    printf("in copybuffer, buffer empty, waiting on consumer_cond\n");
+    int err;        
+    if (err = pthread_cond_wait(&circular_buffer.consumer_cond,&circular_buffer.lock)) {
+      printf("pthread_cond_wait failed in dispatcher, error code:%d",err);
+      return 0;
+    }
+  }
+  printf("in copybuffer, finished waiting.\n");
   int count = 0;
   void** from_buff = (void**)calloc((circular_buffer.cb)->size, sizeof(void**));
-  while ((from_buff[count] = circBuff_pop(circular_buffer.cb)) != 0){
+  while ((from_buff[count] = circBuff_pop(circular_buffer.cb)) != 0) {
       count++;
   }
   flat_buffer* flat = (flat_buffer*)calloc(1,sizeof(flat_buffer));
@@ -309,7 +262,7 @@ while (circBuff_isEmpty(circular_buffer.cb))
 
 }
 
-int dispatcher_thread(void* arg)//ARG is unused.
+int dispatcher_thread(void __attribute__ ((unused)) *arg)
 {
     while(1)
     {
@@ -341,9 +294,6 @@ void dispatcher_transmit(flat_buffer* flat_buff) {
         from_buff[k]->owner->state = SHINITAI;
         pthread_mutex_unlock(&worker_pool.lock);
     }
-    //printf("text:%s\n",((text_frame*)from_buff[k])->text);
-    //fflush(stdout);  
-    //write(i->socket, i->text, strlen(i->text));
     free_text_frame(from_buff[k]);
   }
   free(from_buff);
@@ -371,28 +321,6 @@ int server_thread(void* args) {
     // Will later change this to giving to a thread
     // Parent just continues the loop, wainting for another client
     assign_worker(i,client_socket,0);
-    /*if(fork() == 0) {
-      // Read a request from the client
-      char buffer[REQUEST_SIZE];
-      bzero(buffer, REQUEST_SIZE);
-      
-      int n = read(client_socket, buffer, REQUEST_SIZE-1);
-      if (n < 0)
-        error("ERROR reading from socket\n");
-      
-      // Print the request
-      printf("From client %d:\n%s\n", i, buffer);
-      
-      // DO SHIT
-      // This part of it be difficult
-      // Get the workers, try to find a new one
-      // If there is one, give it the task of this user
-      // If there not be one, make a new one
-      // If there are too many, kill idle ones
-      
-      return 0;
-    }*/
-    // Close socket?
   }
   // The main loop is over, so close the socket and finish up
   close(server_socket);
@@ -405,31 +333,10 @@ int main (void)
 {
     
     //Begin initializing global locks and conds
-/*
-    pthread_mutex_t buffer_lock;
-    pthread_mutex_init(&buffer_lock,NULL);
-    
-    pthread_cond_t  buffer_cond;
-    pthread_cond_init(&buffer_cond,NULL);
-
-    pthread_cond_t buffer_empty_cond;
-    pthread_cond_init(&buffer_empty_cond,NULL);
-
-    circBuff* buffer;
-    buffer = circBuff_init(100);
-
-    pthread_mutex_t tcb_lock;
-    pthread_mutex_init(&tcb_lock,NULL);
-    
-    worker_pool* pool; 
-*/ 
     pthread_mutex_init(&circular_buffer.lock,NULL);
     pthread_cond_init(&circular_buffer.producer_cond, NULL);
     pthread_cond_init(&circular_buffer.consumer_cond, NULL);
     circular_buffer.cb = circBuff_init(100);
-
-//    pthread_t producers[POOL_SIZE];
-//    tcb worker_pool[POOL_SIZE];
 
     pthread_mutex_init(&worker_pool.lock,NULL);
     pthread_mutex_lock(&worker_pool.lock);
@@ -441,27 +348,15 @@ int main (void)
 
     int i;
     
-/*    for (i = 0; i < POOL_SIZE; i++)
-    {
-        assign_worker(i,0,0);
-    }*/
-/*
-        dispatch_arg *disp_args = calloc(1,sizeof(dispatch_arg));
-        disp_args->buffer = buffer;
-        disp_args->buffer_lock  = &buffer_lock;
-        disp_args->buffer_cond  = &buffer_cond;
-        disp_args->buffer_empty_cond = &buffer_empty_cond;
-*/
-        pthread_t disp_thread;
-        pthread_t serv_thread;
+    pthread_t disp_thread;
+    pthread_t serv_thread;
 
-        int port = 8080;
+    int port = 8080;
 
-        pthread_create(&disp_thread,NULL,dispatcher_thread,(void*)0);
-        pthread_create(&serv_thread,NULL,server_thread,(void*)&port);
+    pthread_create(&disp_thread,NULL,dispatcher_thread,(void*)0);
+    pthread_create(&serv_thread,NULL,server_thread,(void*)&port);
 
-        while(1)
-        {
-            sleep(1000);
-        }
+    while (1) {
+        sleep(1000);
+    }
 }
