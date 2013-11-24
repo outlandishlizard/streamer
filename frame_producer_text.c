@@ -10,7 +10,7 @@
 typedef struct {
     pthread_t *thread;
 
-    enum {IDLE,WORKING,KILLME,UNINITIALIZED} state;
+    enum {IDLE,WORKING,SHINITAI,UNINITIALIZED} state;
     int name;
     int sockfd;
     int resource_fd;   
@@ -23,9 +23,19 @@ typedef struct {
     circBuff *buffer;
 } tcb;
 
+void tcb_cleanup(tcb* block)
+{
+    block->name         = 0;
+    block->sockfd       = 0;
+    block->resource_fd  = 0;
+    block->state        = IDLE;
+    return;
+}
+
+
 typedef struct {
     int priority;
-    int dest_sockfd;
+    tcb* owner;
     char* text;
 } text_frame;
 
@@ -67,7 +77,6 @@ void free_text_frame(text_frame *tf)
 }
 
 
-
 int text_producer(void* _block)
 {
     /* Logic:
@@ -75,13 +84,17 @@ int text_producer(void* _block)
      *  2. Try to acquire buffer_cond, block until we do (ie, grab lock, 4
      *  3. Add a data block to the circular buffer
      *  4. Release buffer_cond
-     *  5. Loop, unless state == KILLME, in which case, cleanup. Note that sync problems are possible here (ie, we may have to go through an extra iteration before noticing we're supposed to die in some cases, however, this will at worst cause minor control latency issues, nothing more.
+     *  5. Loop, unless state == SHINITAI, in which case, cleanup. Note that sync problems are possible here (ie, we may have to go through an extra iteration before noticing we're supposed to die in some cases, however, this will at worst cause minor control latency issues, nothing more.
      * */
 
     tcb* block = (tcb*)_block;
     int framenum = 0;
-    while(block->state != KILLME)
+    while(1)
     {
+        if (block->state == SHINITAI)
+        {
+            tcb_cleanup(block);
+        }
         //Check that we're in a state that we should be in, block until we are.
         while (block->state != WORKING)
         {
@@ -103,7 +116,7 @@ int text_producer(void* _block)
         text_frame *frame = (text_frame*)calloc(1,sizeof(text_frame));
         frame->priority = block->name;
         frame->text = text_string;
-        frame->dest_sockfd = block->sockfd;
+        frame->owner = block;
         pthread_mutex_lock(&circular_buffer.lock);
         printf("In worker, got circbuff lock, waiting on cond\n");
         while (circBuff_push(circular_buffer.cb,frame))
@@ -318,11 +331,16 @@ int dispatcher_thread(void* arg)//ARG is unused.
 void dispatcher_transmit(flat_buffer* flat_buff) {
     //Note here that length is NOT nescessarily the full size of the buffer, as we may have dispatched without a full buffer.
   // Now send them all
-  void **from_buff = flat_buff->from_buff; 
+  text_frame **from_buff = (text_frame**)(flat_buff->from_buff); 
   for (int k=0; k < flat_buff->length; k++) {
-    int frame_sockfd = ((text_frame*)from_buff[k])->dest_sockfd;
-    char* frame_text = ((text_frame*)from_buff[k])->text;
-    send(frame_sockfd, frame_text, strlen(frame_text),MSG_DONTWAIT|MSG_NOSIGNAL);
+    int frame_sockfd = (from_buff[k])->owner->sockfd;
+    char *frame_text = (from_buff[k])->text;
+    if(send(frame_sockfd, frame_text, strlen(frame_text),MSG_DONTWAIT|MSG_NOSIGNAL)==-1)
+    {
+        pthread_mutex_lock(&worker_pool.lock);
+        from_buff[k]->owner->state = SHINITAI;
+        pthread_mutex_unlock(&worker_pool.lock);
+    }
     //printf("text:%s\n",((text_frame*)from_buff[k])->text);
     //fflush(stdout);  
     //write(i->socket, i->text, strlen(i->text));
