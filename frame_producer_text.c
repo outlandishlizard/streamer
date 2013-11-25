@@ -86,7 +86,7 @@ char* get_jpeg_data(char* path,int index)
     char* rbuff = calloc(2048,sizeof(char));
 //    printf("About to enter loop\n");
     int amount=0;
-    while(amount = read(fd,rbuff,(size_t)chunk) > 0)
+    while((amount = read(fd,rbuff,(size_t)chunk)) > 0)
     {
         printf("Looping in jpeg, read:%d\n",amount);
         rbuff = realloc(rbuff,rsize+chunk);
