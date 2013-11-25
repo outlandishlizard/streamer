@@ -114,7 +114,7 @@ int text_producer(void* _block)
             //The buffer is full, or some other error state, we sleep until it isn't.
             pthread_cond_wait(&circular_buffer.producer_cond, &circular_buffer.lock);
         }
-        if (circBuff_isOne(block->buffer))
+        if (circBuff_isFull(block->buffer))
         {
             printf("signalling consumer_cond\n");
             pthread_cond_signal(&circular_buffer.consumer_cond);

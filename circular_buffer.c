@@ -13,11 +13,15 @@ circBuff* circBuff_init(int size)
 	//printf("buffer->size in create:%d", buffer->size);
     return buffer;
 }
+
+/* Return 1 if empty */
 int circBuff_isEmpty(circBuff *buffer)
 {
     return buffer->read == buffer->write;
 }
-int circBuff_isOne(circBuff *buffer)
+
+/* Return 1 if full */
+int circBuff_isFull(circBuff *buffer)
 {
     return (buffer->read+1)%(buffer->size) == buffer->write % buffer->size;
 }
