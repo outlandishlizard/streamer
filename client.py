@@ -3,6 +3,7 @@ import socket
 import sys
 #import pygame
 import select
+import struct
 
 class Sock:
   # When a new socket is created, init it
@@ -39,20 +40,15 @@ if __name__ == "__main__":
         client_process(data)
         if sys.stdin in select.select([sys.stdin], [], [], 0)[0]:
           r = sys.stdin.readline().rstrip()
-          if r == '>':
-            client_sock.send_msg('0')
-          if r == '<':
-            client_sock.send_msg('1')
-          if r == 'p':
-            client_sock.send_msg('2')
-          if r == 's':
-            client_sock.send_msg('3')
+          if r:
+            client_sock.send_msg(struct.pack('!i', int(r)))
           else:
             print "Invalid command"
       except SystemExit:
         exit()
       except KeyboardInterrupt:
         print " Shutdown requested...exiting"
+        client_sock.send_msg(struct.pack('!i', 3))
         exit()
       except:
         print "Unexpected error with reading/writing:", sys.exc_info()[0]
