@@ -104,16 +104,21 @@ int text_producer(void* _block)
         printf("started working!\n");
 	// Check if there is a msg from the client
 	int command = -1;
+	int jump = 0;
 	recv(block->sockfd, &command, sizeof(int) , MSG_DONTWAIT);
 	command = ntohl(command);
 	switch(command) {
 	case -1:
 		break;
 	case 0:
-		framenum += 10;
+	        recv(block->sockfd, &jump, sizeof(int) , MSG_DONTWAIT);
+		jump = ntohl(jump)
+		framenum += jump;
 		break;
         case 1:
-                framenum -= 10;
+                recv(block->sockfd, &jump, sizeof(int) , MSG_DONTWAIT);
+                jump = ntohl(jump)
+                framenum += jump;
                 break;
 	case 2:
 		paused ^= 1;
