@@ -52,7 +52,6 @@ typedef struct {
     int length;
 } flat_buffer;
 
-
 void tcb_cleanup(tcb* block)
 {
     block->name         = 0;
@@ -67,6 +66,31 @@ void free_text_frame(text_frame *tf)
     free(tf->text);
     free(tf);
 }
+
+text_frame* get_jpeg_frame(char* path,int index)
+{
+    char* filename = calloc(256,sizeof(char));
+    snprintf(filename,(size_t)256,"%s/%d.jpeg",path,index);
+    int fd;
+    if(fd = open(filename,O_RDONLY) < 0)
+    {
+        printf("Failed to open %s\n",filename);
+        return 0;
+    }
+    text_frame* frame = calloc(1,sizeof(text_frame));
+    int rsize = 2048;
+    int chunk = 2048;
+    char* rbuff = calloc(2048,sizeof(char));
+    while(read(fd,rbuff,chunk) > 0)
+    {
+        rbuff = realloc(rbuff,rsize+chunk);
+        rsize+=chunk;
+    }
+    frame->text = rbuff;
+    frame->priority = 0; //TODO make this meaningful.
+    return frame;
+}
+
 
 int text_producer(void* _block)
 {
