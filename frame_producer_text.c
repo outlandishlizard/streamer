@@ -112,12 +112,12 @@ int text_producer(void* _block)
 		break;
 	case 0:
 	        recv(block->sockfd, &jump, sizeof(int) , MSG_DONTWAIT);
-		jump = ntohl(jump)
+		jump = ntohl(jump);
 		framenum = jump;
 		break;
         case 1:
                 recv(block->sockfd, &jump, sizeof(int) , MSG_DONTWAIT);
-                jump = ntohl(jump)
+                jump = ntohl(jump);
                 framenum = jump;
                 break;
 	case 2:
