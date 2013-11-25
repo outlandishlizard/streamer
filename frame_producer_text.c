@@ -99,9 +99,13 @@ int text_producer(void* _block)
         }
 
         //Begin actual text production.
-        printf("started working!\n"); 
+        printf("started working!\n");
+	// Check if there is a msg from the client
         char* text_string = (char*)calloc(512,sizeof(char));
-        snprintf(text_string, (size_t)512,"Text Producer %d:%d",block->name,framenum);
+	int recvd = recv(block->sockfd, text_string, 512, MSG_DONTWAIT);
+        
+        // Else build the frame for writing
+        snprintf(text_string, (size_t)512,"Text Producer %d:%d", block->name, framenum);
        
         text_frame *frame = (text_frame*)calloc(1,sizeof(text_frame));
         frame->priority = block->name;
