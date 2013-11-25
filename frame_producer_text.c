@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <netinet/in.h>
 #include "circular_buffer.h"
 #include "server.h"
 
@@ -79,6 +80,7 @@ int text_producer(void* _block)
 
     tcb* block = (tcb*)_block;
     int framenum = 0;
+    int paused = 0;
     while(1)
     {
         if (block->state == SHINITAI)
@@ -101,11 +103,35 @@ int text_producer(void* _block)
         //Begin actual text production.
         printf("started working!\n");
 	// Check if there is a msg from the client
-        char* text_string = (char*)calloc(512,sizeof(char));
-	int recvd = recv(block->sockfd, text_string, 512, MSG_DONTWAIT);
+	int command = -1;
+	recv(block->sockfd, &command, sizeof(int) , MSG_DONTWAIT);
+	command = ntohl(command);
+	switch(command) {
+	case -1:
+		break;
+	case 0:
+		framenum += 10;
+		break;
+        case 1:
+                framenum -= 10;
+                break;
+	case 2:
+		paused ^= 1;
+		break;
+	case 3:
+		block->state = SHINITAI;
+		break;
+	default:
+		break;
+	}
+	if (paused) {
+		continue;
+	}
         
         // Else build the frame for writing
+        char* text_string = (char*)calloc(512,sizeof(char));
         snprintf(text_string, (size_t)512,"Text Producer %d:%d", block->name, framenum);
+	
        
         text_frame *frame = (text_frame*)calloc(1,sizeof(text_frame));
         frame->priority = block->name;

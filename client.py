@@ -40,13 +40,13 @@ if __name__ == "__main__":
         if sys.stdin in select.select([sys.stdin], [], [], 0)[0]:
           r = sys.stdin.readline().rstrip()
           if r == '>':
-            client_sock.send_msg('CMD,SEEK,10')
+            client_sock.send_msg('0')
           if r == '<':
-            client_sock.send_msg('CMD,SEEK,-10')
+            client_sock.send_msg('1')
           if r == 'p':
-            client_sock.send_msg('CMD,TOGGLE')
+            client_sock.send_msg('2')
           if r == 's':
-            client_sock.send_msg('CMD,STOP')
+            client_sock.send_msg('3')
           else:
             print "Invalid command"
       except SystemExit:
