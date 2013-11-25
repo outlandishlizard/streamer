@@ -1,10 +1,11 @@
-
+import pygame
 import socket
 import sys
 #import pygame
+import io
 import select
 import struct
-
+displaySurface = None
 class Sock:
   # When a new socket is created, init it
   def __init__(self, host, port):
@@ -18,11 +19,16 @@ class Sock:
   def close(self):
     return self.sock.close()
 
-def client_process(recv):
-    print recv
+def client_process(data_frame):
+  data_frame.seek(0)
+  frame = pygame.image.load(data_frame)
+  displaySurface.blit(frame)
 
 if __name__ == "__main__":
-  # Check that host and port were included as args
+  pygame.init()
+  displaySurface = pygame.display.set_mode((256,256),pygame.DOUBLEBUF)
+     
+    # Check that host and port were included as args
   if len(sys.argv) != 3:
     print "Incorrect usage. ./server <host> <port>"
     exit(1)
@@ -36,8 +42,15 @@ if __name__ == "__main__":
     # Get input from user, send it over the socket, read response
     while True:
       try:
-        data = client_sock.get_msg(256)
-        client_process(data)
+        frame_file = io.BytesIO('frame')  
+        data = client_sock.get_msg(4096)
+#        data = data[::-1]
+        f = open('./got','w+')
+        f.write(data)
+        f.close()
+        frame_file.write(data)
+        client_process(frame_file)
+        frame_file.close()
         if sys.stdin in select.select([sys.stdin], [], [], 0)[0]:
           r = sys.stdin.readline().rstrip()
           if r:

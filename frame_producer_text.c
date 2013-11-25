@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include "circular_buffer.h"
 #include "server.h"
@@ -15,7 +16,8 @@ typedef struct {
     enum {IDLE,WORKING,SHINITAI,UNINITIALIZED} state;
     int name;
     int sockfd;
-    int resource_fd;   
+    int resource_fd;
+    char* path;   
     pthread_cond_t *buffer_cond;
     pthread_cond_t *buffer_empty_cond;
     pthread_cond_t *tcb_cond;
@@ -67,28 +69,32 @@ void free_text_frame(text_frame *tf)
     free(tf);
 }
 
-text_frame* get_jpeg_frame(char* path,int index)
+char* get_jpeg_data(char* path,int index)
 {
+//    printf("In get_jpeg_data\n");
     char* filename = calloc(256,sizeof(char));
-    snprintf(filename,(size_t)256,"%s/%d.jpeg",path,index);
-    int fd;
-    if(fd = open(filename,O_RDONLY) < 0)
+    snprintf(filename,(size_t)256,"%s/frame-%d.jpeg",path,index);
+    int fd=0;
+    if((fd = open(filename,O_RDONLY)) < 0)
     {
         printf("Failed to open %s\n",filename);
         return 0;
     }
-    text_frame* frame = calloc(1,sizeof(text_frame));
+//    printf("Opened file in jpeg, fd:%d,path:%s\n",fd,filename);
     int rsize = 2048;
     int chunk = 2048;
     char* rbuff = calloc(2048,sizeof(char));
-    while(read(fd,rbuff,chunk) > 0)
+//    printf("About to enter loop\n");
+    int amount=0;
+    while(amount = read(fd,rbuff,(size_t)chunk) > 0)
     {
+        printf("Looping in jpeg, read:%d\n",amount);
         rbuff = realloc(rbuff,rsize+chunk);
-        rsize+=chunk;
+        rsize+=amount;
     }
-    frame->text = rbuff;
-    frame->priority = 0; //TODO make this meaningful.
-    return frame;
+    free(filename);
+
+    return rbuff;
 }
 
 
@@ -131,7 +137,8 @@ int text_producer(void* _block)
 	int jump = 0;
 	recv(block->sockfd, &command, sizeof(int) , MSG_DONTWAIT);
 	command = ntohl(command);
-	switch(command) {
+	printf("Command:%d\n",command);
+    switch(command) {
 	case -1:
 		break;
 	case 0:
@@ -159,13 +166,14 @@ int text_producer(void* _block)
         // Else build the frame for writing
         char* text_string = (char*)calloc(512,sizeof(char));
         snprintf(text_string, (size_t)512,"Text Producer %d:%d", block->name, framenum);
-	
-        sleep(1);
-        text_frame *frame = (text_frame*)calloc(1,sizeof(text_frame));
+        text_frame *frame = calloc(1,sizeof(text_frame));	
+    //    sleep(1);
+        char *image_data = get_jpeg_data(block->path,framenum); 
         frame->priority = block->name;
-        frame->text = text_string;
         frame->owner = block;
-        pthread_mutex_lock(&circular_buffer.lock);
+        frame->text = image_data;
+        sleep(1);
+//        pthread_mutex_lock(&circular_buffer.lock);
         printf("In worker, got circbuff lock, waiting on cond\n");
         while (circBuff_push(circular_buffer.cb,frame))
         {
@@ -175,11 +183,11 @@ int text_producer(void* _block)
         if (circBuff_isFull(block->buffer))
         {
             printf("signalling consumer_cond\n");
-            pthread_cond_signal(&circular_buffer.consumer_cond);
+//            pthread_cond_signal(&circular_buffer.consumer_cond);
         }
         framenum++;
         pthread_mutex_unlock(&circular_buffer.lock);
-        printf("In worker, released circbuff lock\n");
+//        printf("In worker, released circbuff lock\n");
     }   
     return framenum;
 
@@ -195,10 +203,11 @@ int dispatch(tcb* control,int name,int sockfd,int resource_fd)
     control->sockfd = sockfd;
     control->state  = WORKING;
     control->resource_fd = resource_fd;
+    control->path = "./testvideo/";
     //signal for wakeup on semaphore
     
     pthread_create(control->thread,NULL,worker_pool.task,(void*)control);
-    printf("Signalling to start worker thread at cond: %p\n",control->tcb_cond);
+//    printf("Signalling to start worker thread at cond: %p\n",control->tcb_cond);
     pthread_cond_signal(control->tcb_cond);
     return 1;
 }
@@ -301,14 +310,14 @@ int pool_shrink (void)
 flat_buffer* dispatcher_copybuffer()
 {
   while (circBuff_isEmpty(circular_buffer.cb)) {
-    printf("in copybuffer, buffer empty, waiting on consumer_cond\n");
+//    printf("in copybuffer, buffer empty, waiting on consumer_cond\n");
     int err;        
     if (err = pthread_cond_wait(&circular_buffer.consumer_cond,&circular_buffer.lock)) {
       printf("pthread_cond_wait failed in dispatcher, error code:%d",err);
       return 0;
     }
   }
-  printf("in copybuffer, finished waiting.\n");
+//  printf("in copybuffer, finished waiting.\n");
   int count = 0;
   void** from_buff = (void**)calloc((circular_buffer.cb)->size, sizeof(void**));
   while ((from_buff[count] = circBuff_pop(circular_buffer.cb)) != 0) {
@@ -325,15 +334,15 @@ int dispatcher_thread(void __attribute__ ((unused)) *arg)
 {
     while(1)
     {
-        printf("in dispatcher,trying to acquire circular_buffer.lock\n");
+//        printf("in dispatcher,trying to acquire circular_buffer.lock\n");
         pthread_mutex_lock(&circular_buffer.lock);
-        printf("in dispatcher,got circular_buffer.lock\n");
+//        printf("in dispatcher,got circular_buffer.lock\n");
 
         //BEGIN CRITICAL 
         flat_buffer* flat_buff = dispatcher_copybuffer();
         pthread_cond_broadcast(&circular_buffer.producer_cond);
         pthread_mutex_unlock(&circular_buffer.lock);
-        printf("In dispatcher, released lock\n");
+//        printf("In dispatcher, released lock\n");
         //END CRITICAL
        //Perform noncritical section
         dispatcher_transmit(flat_buff);
@@ -347,8 +356,10 @@ void dispatcher_transmit(flat_buffer* flat_buff) {
   for (int k=0; k < flat_buff->length; k++) {
     int frame_sockfd = (from_buff[k])->owner->sockfd;
     char *frame_text = (from_buff[k])->text;
+    printf("Text:%s\n",frame_text);
     if(send(frame_sockfd, frame_text, strlen(frame_text),MSG_DONTWAIT|MSG_NOSIGNAL)==-1)
     {
+        printf("Send failed!\n");
         pthread_mutex_lock(&worker_pool.lock);
         from_buff[k]->owner->state = SHINITAI;
         pthread_mutex_unlock(&worker_pool.lock);
