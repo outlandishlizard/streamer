@@ -135,22 +135,21 @@ int text_producer(void* _block)
 	case -1:
 		break;
 	case 0:
-	        recv(block->sockfd, &jump, sizeof(int) , MSG_DONTWAIT);
+	        recv(block->sockfd, &jump, sizeof(int), 0);
 		jump = ntohl(jump);
 		framenum = jump;
+                printf("SKIPPING TO %d\n", jump);
 		break;
-        case 1:
-                recv(block->sockfd, &jump, sizeof(int) , MSG_DONTWAIT);
-                jump = ntohl(jump);
-                framenum = jump;
-                break;
-	case 2:
+	case 1:
+                printf("PAUSING\n");
 		paused ^= 1;
 		break;
-	case 3:
+	case 2:
+                printf("DYING\n");
 		block->state = SHINITAI;
 		break;
 	default:
+                printf("NOPE. GOT %d\n", command);
 		break;
 	}
 	if (paused) {
@@ -161,7 +160,7 @@ int text_producer(void* _block)
         char* text_string = (char*)calloc(512,sizeof(char));
         snprintf(text_string, (size_t)512,"Text Producer %d:%d", block->name, framenum);
 	
-       
+        sleep(1);
         text_frame *frame = (text_frame*)calloc(1,sizeof(text_frame));
         frame->priority = block->name;
         frame->text = text_string;
