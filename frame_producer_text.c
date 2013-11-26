@@ -112,6 +112,27 @@ rbuff_ret* get_jpeg_data(char* path,int index)
     return ret;
 }
 
+struct text_helper_struct {
+  text_frame *frame;
+  tcb *block;
+  int *framenumber;
+};
+
+int text_helper (struct text_helper_struct *s) {
+        printf("In worker, got circbuff lock, waiting on cond\n");
+        while (circBuff_push(circular_buffer.cb, s->frame))
+        {
+            //The buffer is full, or some other error state, we sleep until it isn't.
+            pthread_cond_wait(&circular_buffer.producer_cond, &circular_buffer.lock);
+        }
+        if (circBuff_isFull(s->block->buffer))
+        {
+            printf("signalling consumer_cond\n");
+            pthread_cond_signal(&circular_buffer.consumer_cond);
+        }
+        (*(s->framenumber))++;
+        return 0;
+}
 
 int text_producer(void* _block)
 {
@@ -203,58 +224,44 @@ int text_producer(void* _block)
         frame->text = image_data->text;
         frame->length= image_data->length;
         free(image_data);
+        struct text_helper_struct t = {
+          .frame = frame,
+          .block = block,
+          .framenumber = &framenum,
+        };
         pthread_mutex_lock(&circular_buffer.lock);
-        printf("In worker, got circbuff lock, waiting on cond\n");
-        while (circBuff_push(circular_buffer.cb,frame))
-        {
-            //The buffer is full, or some other error state, we sleep until it isn't.
-            pthread_cond_wait(&circular_buffer.producer_cond, &circular_buffer.lock);
-        }
-        if (circBuff_isFull(block->buffer))
-        {
-            printf("signalling consumer_cond\n");
-            pthread_cond_signal(&circular_buffer.consumer_cond);
-        }
-        framenum++;
+        text_helper(&t);
         pthread_mutex_unlock(&circular_buffer.lock);
     }   
     return framenum;
 
 }
 
-int dispatch(tcb* control,int name,int sockfd,int resource_fd,char* resname)
+struct dispatch_struct {
+  tcb *control;
+  int name;
+  int sockfd;
+  int resource_fd;
+  char *resname;
+};
+
+int dispatch(struct dispatch_struct *d)
 {
-    if (control->state == WORKING)
+    if (d->control->state == WORKING)
     {
         return 1;
     }
-    control->name   = name;
-    control->sockfd = sockfd;
-    control->state  = WORKING;
-    control->resource_fd = resource_fd;
-    control->path = resname;
+    d->control->name   = d->name;
+    d->control->sockfd = d->sockfd;
+    d->control->state  = WORKING;
+    d->control->resource_fd = d->resource_fd;
+    d->control->path = d->resname;
     //signal for wakeup on semaphore
     
-    pthread_create(control->thread,NULL,worker_pool.task,(void*)control);
+    pthread_create(d->control->thread,NULL,worker_pool.task,(void*)d->control);
 //    printf("Signalling to start worker thread at cond: %p\n",control->tcb_cond);
-    pthread_cond_signal(control->tcb_cond);
+    pthread_cond_signal(d->control->tcb_cond);
     return 1;
-}
-
-int create_worker_pool(void *task, int size)
-{
-    worker_pool.workers = calloc(size,sizeof(tcb**));
-    worker_pool.size    = size;
-    worker_pool.task    = task;
-    int i =0;
-    for (i=0;i<size;i++)
-    {
-        tcb* worker = calloc(1,sizeof(tcb));
-        worker_pool.workers[i] = worker;
-
-        worker->state        = UNINITIALIZED;
-    }
-    return 0;
 }
 
 void initialize_workers()
@@ -282,7 +289,30 @@ void initialize_workers()
     }
 }
 
-int pool_grow (void)
+struct create_worker_pool_struct {
+  void *task;
+  int size;
+};
+
+int create_worker_pool(struct create_worker_pool_struct *c)
+{
+    worker_pool.workers = calloc(c->size,sizeof(tcb**));
+    worker_pool.size    = c->size;
+    worker_pool.task    = c->task;
+    int i;
+    for (i = 0; i < c->size; i++)
+    {
+        tcb* worker = calloc(1,sizeof(tcb));
+        worker_pool.workers[i] = worker;
+
+        worker->state        = UNINITIALIZED;
+    }
+    initialize_workers();
+    return 0;
+}
+
+
+int pool_grow (void __attribute__((unused)) *a)
 {
     tcb **newmem = realloc(worker_pool.workers, (2 * worker_pool.size * sizeof(tcb *)));
     if (newmem)
@@ -332,18 +362,25 @@ int assign_worker (int name, int sockfd, int resource_fd,char* resname)
     if (i == worker_pool.size)
     {
         pthread_mutex_lock(&worker_pool.lock);
-        pool_grow();
+        pool_grow(NULL);
         pthread_mutex_unlock(&worker_pool.lock);
         return assign_worker(name,sockfd,resource_fd,resname);
     }
+    struct dispatch_struct d = {
+      .control = worker_pool.workers[i],
+      .name = name,
+      .sockfd = sockfd,
+      .resource_fd = resource_fd,
+      .resname = resname,
+    };
     pthread_mutex_lock(&worker_pool.lock);
-    dispatch(worker_pool.workers[i], name, sockfd, resource_fd,resname);
+    dispatch(&d);
     pthread_mutex_unlock(&worker_pool.lock);
     return 0;
 }
 
 
-flat_buffer* dispatcher_copybuffer()
+flat_buffer* dispatcher_copybuffer (void __attribute__((unused)) *a)
 {
   while (circBuff_isEmpty(circular_buffer.cb)) {
     printf("dispatcher in copybuffer, buffer empty, waiting on consumer_cond\n");
@@ -366,6 +403,11 @@ flat_buffer* dispatcher_copybuffer()
 
 }
 
+void *shinitai (text_frame *t) {
+  t->owner->state = SHINITAI;
+  return NULL;
+}
+
 void dispatcher_transmit(flat_buffer* flat_buff) {
     //Note here that length is NOT nescessarily the full size of the buffer, as we may have dispatched without a full buffer.
   // Now send them all
@@ -381,7 +423,7 @@ void dispatcher_transmit(flat_buffer* flat_buff) {
     {
         printf("dispatcher Send failed length!\n");
         pthread_mutex_lock(&worker_pool.lock);
-        from_buff[k]->owner->state = SHINITAI;
+        shinitai(from_buff[k]);
         pthread_mutex_unlock(&worker_pool.lock);
     }
     
@@ -389,7 +431,7 @@ void dispatcher_transmit(flat_buffer* flat_buff) {
     {
         printf("dispatcher Send failed!\n");
         pthread_mutex_lock(&worker_pool.lock);
-        from_buff[k]->owner->state = SHINITAI;
+        shinitai(from_buff[k]);
         pthread_mutex_unlock(&worker_pool.lock);
     }
     free_text_frame(from_buff[k]);
@@ -402,16 +444,12 @@ void *dispatcher_thread(void __attribute__ ((unused)) *arg)
 {
     while(1)
     {
-        printf("in dispatcher,trying to acquire circular_buffer.lock\n");
-        pthread_mutex_lock(&circular_buffer.lock);
-        printf("in dispatcher,got circular_buffer.lock\n");
-
-        //BEGIN CRITICAL
         printf("dispatcher About to enter copybuffer\n");
-        flat_buffer* flat_buff = dispatcher_copybuffer();
+        pthread_mutex_lock(&circular_buffer.lock);
+        flat_buffer* flat_buff = dispatcher_copybuffer(NULL);
+        pthread_mutex_unlock(&circular_buffer.lock);
         printf("dispatcher Finished copybuffer\n");
         pthread_cond_broadcast(&circular_buffer.producer_cond);
-        pthread_mutex_unlock(&circular_buffer.lock);
         printf("In dispatcher, released lock\n");
         //END CRITICAL
        //Perform noncritical section
@@ -464,9 +502,12 @@ int main (void)
     circular_buffer.cb = circBuff_init(100);
 
     pthread_mutex_init(&worker_pool.lock,NULL);
+    struct create_worker_pool_struct c = {
+      .task = text_producer,
+      .size = 1,
+    };
     pthread_mutex_lock(&worker_pool.lock);
-    create_worker_pool(text_producer,1);
-    initialize_workers();
+    create_worker_pool(&c);
     pthread_mutex_unlock(&worker_pool.lock);
 
     pthread_t disp_thread;
