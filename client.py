@@ -17,7 +17,12 @@ class Sock:
   def send_msg(self, msg):
     self.sock.send(msg)
   def get_msg(self, size):
-    return self.sock.recv(size)
+    gotten=0
+    strgot = ''
+    while (gotten < size):
+      strgot+=self.sock.recv(size)
+      gotten = len(strgot)
+    return strgot
   def send_hello(self):
     l = len(sys.argv[3])
     client_sock.send_msg(struct.pack('!i', int(l)))
@@ -63,12 +68,7 @@ if __name__ == "__main__":
 
         frame_file = io.BytesIO('frame')
         if(paused > 0):
-            length = ''
-            county = 4
-            while len(length) != 4:
-                length = client_sock.get_msg(county)
-                county -= len(length)
-            print len(length)
+            length = client_sock.get_msg(county)
             length= struct.unpack('!I',length)[0]
             data = client_sock.get_msg(length)
             f = open('./got','w+')
