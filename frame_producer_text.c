@@ -47,13 +47,17 @@ typedef struct {
     int priority;
     tcb* owner;
     char* text;
+    int length;
 } text_frame;
 
 typedef struct {
     void ** from_buff;
     int length;
 } flat_buffer;
-
+typedef struct {
+    char* text;
+    int length;
+} rbuff_ret;
 void tcb_cleanup(tcb* block)
 {
     block->name         = 0;
@@ -77,24 +81,35 @@ char* get_jpeg_data(char* path,int index)
     int fd=0;
     if((fd = open(filename,O_RDONLY)) < 0)
     {
+        free(filename);
+        if (index == 0)
+        {
         printf("Failed to open %s\n",filename);
         return 0;
+        }
+        else
+            return get_jpeg_data(path,0);
     }
 //    printf("Opened file in jpeg, fd:%d,path:%s\n",fd,filename);
     int rsize = 2048;
     int chunk = 2048;
+    int sizecount = 0;
     char* rbuff = calloc(2048,sizeof(char));
 //    printf("About to enter loop\n");
     int amount=0;
-    while((amount = read(fd,rbuff,(size_t)chunk)) > 0)
+    while((amount = read(fd,(rbuff),(size_t)chunk)) > 0)
     {
-        printf("Looping in jpeg, read:%d\n",amount);
+        sizecount+=amount;
+        printf("Looping in jpeg, read:%d from %s\n",amount,filename);
         rbuff = realloc(rbuff,rsize+chunk);
         rsize+=amount;
     }
     free(filename);
-
-    return rbuff;
+    printf("in jpeg, returning frame of length:~%d\n",sizecount);
+    rbuff_ret *ret = calloc(1,sizeof(rbuff_ret));
+    ret->text = rbuff;
+    ret->length=sizecount;
+    return ret;
 }
 
 
@@ -162,17 +177,17 @@ int text_producer(void* _block)
 	if (paused) {
 		continue;
 	}
-        
         // Else build the frame for writing
         char* text_string = (char*)calloc(512,sizeof(char));
         snprintf(text_string, (size_t)512,"Text Producer %d:%d", block->name, framenum);
         text_frame *frame = calloc(1,sizeof(text_frame));	
     //    sleep(1);
-        char *image_data = get_jpeg_data(block->path,framenum); 
+        rbuff_ret *image_data = get_jpeg_data(block->path,framenum); 
         frame->priority = block->name;
         frame->owner = block;
-        frame->text = image_data;
-        sleep(1);
+        frame->text = image_data->text;
+        frame->length= image_data->length;
+        free(image_data);
 //        pthread_mutex_lock(&circular_buffer.lock);
         printf("In worker, got circbuff lock, waiting on cond\n");
         while (circBuff_push(circular_buffer.cb,frame))
@@ -183,7 +198,7 @@ int text_producer(void* _block)
         if (circBuff_isFull(block->buffer))
         {
             printf("signalling consumer_cond\n");
-//            pthread_cond_signal(&circular_buffer.consumer_cond);
+            pthread_cond_signal(&circular_buffer.consumer_cond);
         }
         framenum++;
         pthread_mutex_unlock(&circular_buffer.lock);
@@ -310,14 +325,14 @@ int pool_shrink (void)
 flat_buffer* dispatcher_copybuffer()
 {
   while (circBuff_isEmpty(circular_buffer.cb)) {
-//    printf("in copybuffer, buffer empty, waiting on consumer_cond\n");
+    printf("dispatcher in copybuffer, buffer empty, waiting on consumer_cond\n");
     int err;        
     if (err = pthread_cond_wait(&circular_buffer.consumer_cond,&circular_buffer.lock)) {
       printf("pthread_cond_wait failed in dispatcher, error code:%d",err);
       return 0;
     }
   }
-//  printf("in copybuffer, finished waiting.\n");
+  printf("dispatcher in copybuffer, finished waiting.\n");
   int count = 0;
   void** from_buff = (void**)calloc((circular_buffer.cb)->size, sizeof(void**));
   while ((from_buff[count] = circBuff_pop(circular_buffer.cb)) != 0) {
@@ -334,15 +349,17 @@ int dispatcher_thread(void __attribute__ ((unused)) *arg)
 {
     while(1)
     {
-//        printf("in dispatcher,trying to acquire circular_buffer.lock\n");
+        printf("in dispatcher,trying to acquire circular_buffer.lock\n");
         pthread_mutex_lock(&circular_buffer.lock);
-//        printf("in dispatcher,got circular_buffer.lock\n");
+        printf("in dispatcher,got circular_buffer.lock\n");
 
         //BEGIN CRITICAL 
+        printf("dispatcher About to enter copybuffer\n");
         flat_buffer* flat_buff = dispatcher_copybuffer();
+        printf("dispatcher Finished copybuffer\n");
         pthread_cond_broadcast(&circular_buffer.producer_cond);
         pthread_mutex_unlock(&circular_buffer.lock);
-//        printf("In dispatcher, released lock\n");
+        printf("In dispatcher, released lock\n");
         //END CRITICAL
        //Perform noncritical section
         dispatcher_transmit(flat_buff);
@@ -352,14 +369,25 @@ int dispatcher_thread(void __attribute__ ((unused)) *arg)
 void dispatcher_transmit(flat_buffer* flat_buff) {
     //Note here that length is NOT nescessarily the full size of the buffer, as we may have dispatched without a full buffer.
   // Now send them all
-  text_frame **from_buff = (text_frame**)(flat_buff->from_buff); 
+    printf("In dispatcher_transmit\n");
+    text_frame **from_buff = (text_frame**)(flat_buff->from_buff); 
   for (int k=0; k < flat_buff->length; k++) {
     int frame_sockfd = (from_buff[k])->owner->sockfd;
     char *frame_text = (from_buff[k])->text;
-    printf("Text:%s\n",frame_text);
-    if(send(frame_sockfd, frame_text, strlen(frame_text),MSG_DONTWAIT|MSG_NOSIGNAL)==-1)
+    int len = (from_buff[k])->length;
+    printf("dispatcher Text:%s\n",frame_text);
+    printf("dispatcher packet length:%d\n",len);
+    if(send(frame_sockfd, &len, sizeof(int),MSG_NOSIGNAL)==-1)
     {
-        printf("Send failed!\n");
+        printf("dispatcher Send failed length!\n");
+        pthread_mutex_lock(&worker_pool.lock);
+        from_buff[k]->owner->state = SHINITAI;
+        pthread_mutex_unlock(&worker_pool.lock);
+    }
+
+    if(send(frame_sockfd, frame_text, len,MSG_DONTWAIT|MSG_NOSIGNAL)==-1)
+    {
+        printf("dispatcher Send failed!\n");
         pthread_mutex_lock(&worker_pool.lock);
         from_buff[k]->owner->state = SHINITAI;
         pthread_mutex_unlock(&worker_pool.lock);
