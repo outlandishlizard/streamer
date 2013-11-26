@@ -178,8 +178,9 @@ int text_producer(void* _block)
 		continue;
 	}
         // Else build the frame for writing
-        char* text_string = (char*)calloc(512,sizeof(char));
-        snprintf(text_string, (size_t)512,"Text Producer %d:%d", block->name, framenum);
+    //    char* text_string = (char*)calloc(512,sizeof(char));
+      //  snprintf(text_string, (size_t)512,"Text Producer %d:%d", block->name, framenum);
+        sleep(1);
         text_frame *frame = calloc(1,sizeof(text_frame));	
     //    sleep(1);
         rbuff_ret *image_data = get_jpeg_data(block->path,framenum); 
@@ -298,7 +299,10 @@ int assign_worker (int name, int sockfd, int resource_fd)
     
     if (i == worker_pool.size)
     {
-        return 1;
+        pthread_mutex_lock(&worker_pool.lock);
+        pool_grow();
+        pthread_mutex_unlock(&worker_pool.lock);
+        return assign_worker(name,sockfd,resource_fd);
     }
     pthread_mutex_lock(&worker_pool.lock);
     dispatch(worker_pool.workers[i], name, sockfd, resource_fd);
@@ -307,13 +311,14 @@ int assign_worker (int name, int sockfd, int resource_fd)
 }
 int pool_grow (void)
 {
-    tcb **newmem = realloc(worker_pool.workers, (2 * worker_pool.size * sizeof(tcb *)));
+    tcb **newmem = realloc(worker_pool.workers, (2 * worker_pool.size * sizeof(tcb **)));
     if (newmem)
     {
         worker_pool.workers= newmem;
         int i=0;
         for (i=worker_pool.size;i<worker_pool.size*2;i++)
         {
+            printf("growing:%d\n",i);
             worker_pool.workers[i]->state = UNINITIALIZED;
         }
         worker_pool.size *= 2;
@@ -387,14 +392,14 @@ void dispatcher_transmit(flat_buffer* flat_buff) {
     int len = (from_buff[k])->length;
     printf("dispatcher Text:%s\n",frame_text);
     printf("dispatcher packet length:%d\n",len);
-    if(send(frame_sockfd, &len, sizeof(int),MSG_NOSIGNAL)==-1)
+    if(send(frame_sockfd, &len, sizeof(int),MSG_DONTWAIT|MSG_NOSIGNAL)==-1)
     {
         printf("dispatcher Send failed length!\n");
         pthread_mutex_lock(&worker_pool.lock);
         from_buff[k]->owner->state = SHINITAI;
         pthread_mutex_unlock(&worker_pool.lock);
     }
-
+    
     if(send(frame_sockfd, frame_text, len,MSG_DONTWAIT|MSG_NOSIGNAL)==-1)
     {
         printf("dispatcher Send failed!\n");
@@ -448,7 +453,7 @@ int main (void)
 
     pthread_mutex_init(&worker_pool.lock,NULL);
     pthread_mutex_lock(&worker_pool.lock);
-    create_worker_pool(text_producer,POOL_SIZE);
+    create_worker_pool(text_producer,1);
     initialize_workers();
     pthread_mutex_unlock(&worker_pool.lock);
 
