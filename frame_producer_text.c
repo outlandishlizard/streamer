@@ -150,7 +150,10 @@ int text_producer(void* _block)
 	// Check if there is a msg from the client
 	int command = -1;
 	int jump = 0;
-	recv(block->sockfd, &command, sizeof(int) , MSG_DONTWAIT);
+    if (!paused)
+	recv(block->sockfd, &command, sizeof(int) , MSG_DONTWAIT|MSG_NOSIGNAL);
+    else
+	recv(block->sockfd, &command, sizeof(int) , MSG_NOSIGNAL);
 	command = ntohl(command);
 	printf("Command:%d\n",command);
     switch(command) {
@@ -163,7 +166,7 @@ int text_producer(void* _block)
                 printf("SKIPPING TO %d\n", jump);
 		break;
 	case 1:
-                printf("PAUSING\n");
+        printf("PAUSING\n");
 		paused ^= 1;
 		break;
 	case 2:
@@ -311,7 +314,7 @@ int assign_worker (int name, int sockfd, int resource_fd)
 }
 int pool_grow (void)
 {
-    tcb **newmem = realloc(worker_pool.workers, (2 * worker_pool.size * sizeof(tcb **)));
+    tcb **newmem = realloc(worker_pool.workers, (2 * worker_pool.size * sizeof(tcb *)));
     if (newmem)
     {
         worker_pool.workers= newmem;
@@ -319,6 +322,7 @@ int pool_grow (void)
         for (i=worker_pool.size;i<worker_pool.size*2;i++)
         {
             printf("growing:%d\n",i);
+            worker_pool.workers[i] = calloc(1,sizeof(tcb));
             worker_pool.workers[i]->state = UNINITIALIZED;
         }
         worker_pool.size *= 2;
