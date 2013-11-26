@@ -68,8 +68,8 @@ if __name__ == "__main__":
 
         frame_file = io.BytesIO('frame')
         if(paused > 0):
-            length = client_sock.get_msg(county)
-            length= struct.unpack('!I',length)[0]
+            length = client_sock.get_msg(4)
+            length= struct.unpack('I',length)[0]
             data = client_sock.get_msg(length)
             f = open('./got','w+')
             f.write(data)
