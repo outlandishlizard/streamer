@@ -25,15 +25,17 @@ int monitor_cond_init (struct monitor_cond *c, struct monitor *monitor) {
   return 0;
 }
 
-void monitor_destroy (struct monitor *m) {
+void *monitor_destroy (struct monitor *m) {
   THREAD(mutex_destroy)(&m->lock);
   THREAD(cond_destroy)(&m->queue);
   free(m);
+  return NULL;
 }
 
-void monitor_cond_destroy (struct monitor_cond *c) {
+void *monitor_cond_destroy (struct monitor_cond *c) {
   THREAD(cond_destroy)(&c->cond);
   free(c);
+  return NULL;
 }
 
 void *monitor_run_fn (struct monitor *m,
@@ -59,19 +61,22 @@ void *monitor_run_fn (struct monitor *m,
 }
 
 /* Caller must own monitor mutex */
-void monitor_cond_wait (struct monitor_cond *c) {
+void *monitor_cond_wait (struct monitor_cond *c) {
   /* Queue up another thread */
   THREAD(cond_signal)(&c->monitor->queue);
   /* Wait */
   THREAD(cond_wait)(&c->cond, &c->monitor->lock);
+  return NULL;
 }
 
 /* Caller need not own monitor mutex */
-void monitor_cond_signal (struct monitor_cond *c) {
+void *monitor_cond_signal (struct monitor_cond *c) {
   THREAD(cond_signal)(&c->cond);
+  return NULL;
 }
 
 /* Caller need not own monitor mutex */
-void monitor_cond_broadcast (struct monitor_cond *c) {
+void *monitor_cond_broadcast (struct monitor_cond *c) {
   THREAD(cond_broadcast)(&c->cond);
+  return NULL;
 }

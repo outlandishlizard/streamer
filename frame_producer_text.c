@@ -1,3 +1,7 @@
+#include "global_config.h"
+#ifdef USE_MONITOR
+# include "monitor.h"
+#endif
 #include <pthread.h>
 #include <string.h>
 #include <stdlib.h>
@@ -18,12 +22,11 @@ typedef struct {
     int sockfd;
     int resource_fd;
     char* path;   
-    pthread_cond_t *buffer_cond;
-    pthread_cond_t *buffer_empty_cond;
-    pthread_cond_t *tcb_cond;
-
-    pthread_mutex_t *buffer_lock;
-    pthread_mutex_t *tcb_lock;
+#ifdef USE_MONITOR
+    struct monitor_cond tcb_cond;
+#else
+    pthread_cond_t tcb_cond;
+#endif
     circBuff *buffer;
 } tcb;
 
@@ -31,15 +34,25 @@ typedef struct {
 struct {
     tcb **workers;
     int size;
+#ifdef USE_MONITOR
+    struct monitor lock;
+#else
     pthread_mutex_t lock;
+#endif
     void* task;
 } worker_pool;
 
 struct {
   circBuff *cb;
+#ifdef USE_MONITOR
+  struct monitor_cond producer_cond;
+  struct monitor_cond consumer_cond;
+  struct monitor lock;
+#else
   pthread_cond_t producer_cond;
   pthread_cond_t consumer_cond;
   pthread_mutex_t lock;
+#endif
 } circular_buffer;
 
 
@@ -88,7 +101,7 @@ rbuff_ret* get_jpeg_data(char* path,int index)
         return 0;
         }
         else
-            return -1;
+          return (rbuff_ret *)-1;
     }
 //    printf("Opened file in jpeg, fd:%d,path:%s\n",fd,filename);
     int rsize = 2048;
@@ -112,6 +125,35 @@ rbuff_ret* get_jpeg_data(char* path,int index)
     return ret;
 }
 
+struct text_helper_struct {
+  text_frame *frame;
+  tcb *block;
+  int *framenumber;
+};
+
+int text_helper (struct text_helper_struct *s) {
+        printf("In worker, got circbuff lock, waiting on cond\n");
+        while (circBuff_push(circular_buffer.cb, s->frame))
+        {
+            //The buffer is full, or some other error state, we sleep until it isn't.
+#ifdef USE_MONITOR
+            monitor_cond_wait(&circular_buffer.producer_cond);
+#else
+            pthread_cond_wait(&circular_buffer.producer_cond, &circular_buffer.lock);
+#endif
+        }
+        if (circBuff_isFull(s->block->buffer))
+        {
+            printf("signalling consumer_cond\n");
+#ifdef USE_MONITOR
+            monitor_cond_signal(&circular_buffer.consumer_cond);
+#else
+            pthread_cond_signal(&circular_buffer.consumer_cond);
+#endif
+        }
+        (*(s->framenumber))++;
+        return 0;
+}
 
 int text_producer(void* _block)
 {
@@ -135,14 +177,20 @@ int text_producer(void* _block)
         //Check that we're in a state that we should be in, block until we are.
         while (block->state != WORKING)
         {
+
+#ifdef USE_MONITOR
+          monitor_run_fn(&worker_pool.lock, (void * (*)(void *))monitor_cond_wait, &block->tcb_cond);
+#else
+            int err;
             pthread_mutex_lock(&worker_pool.lock);
-            int err = pthread_cond_wait(block->tcb_cond, &worker_pool.lock);
+            err = pthread_cond_wait(&block->tcb_cond, &worker_pool.lock);
+            pthread_mutex_unlock(&worker_pool.lock);
             if (err)
             {
                 printf("pthread_cond_wait failed in text_producer, error code:%d",err);
                 return 0;
             }
-            pthread_mutex_unlock(&worker_pool.lock);
+#endif
         }
 
         //Begin actual text production.
@@ -187,7 +235,7 @@ int text_producer(void* _block)
         text_frame *frame = calloc(1,sizeof(text_frame));	
     //    sleep(1);
         rbuff_ret *image_data = get_jpeg_data(block->path,framenum); 
-        if (image_data == -1)
+        if (image_data == (rbuff_ret *)-1)
         {
             framenum=0;
             image_data = get_jpeg_data(block->path,framenum);
@@ -202,59 +250,52 @@ int text_producer(void* _block)
         frame->text = image_data->text;
         frame->length= image_data->length;
         free(image_data);
-//        pthread_mutex_lock(&circular_buffer.lock);
-        printf("In worker, got circbuff lock, waiting on cond\n");
-        while (circBuff_push(circular_buffer.cb,frame))
-        {
-            //The buffer is full, or some other error state, we sleep until it isn't.
-            pthread_cond_wait(&circular_buffer.producer_cond, &circular_buffer.lock);
-        }
-        if (circBuff_isFull(block->buffer))
-        {
-            printf("signalling consumer_cond\n");
-            pthread_cond_signal(&circular_buffer.consumer_cond);
-        }
-        framenum++;
+        struct text_helper_struct t = {
+          .frame = frame,
+          .block = block,
+          .framenumber = &framenum,
+        };
+#ifdef USE_MONITOR
+        monitor_run_fn(&circular_buffer.lock, (void * (*)(void *))text_helper, &t);
+#else
+        pthread_mutex_lock(&circular_buffer.lock);
+        text_helper(&t);
         pthread_mutex_unlock(&circular_buffer.lock);
-//        printf("In worker, released circbuff lock\n");
+#endif
     }   
     return framenum;
 
 }
 
-int dispatch(tcb* control,int name,int sockfd,int resource_fd,char* resname)
+struct dispatch_struct {
+  tcb *control;
+  int name;
+  int sockfd;
+  int resource_fd;
+  char *resname;
+};
+
+int dispatch(struct dispatch_struct *d)
 {
-    if (control->state == WORKING)
+    if (d->control->state == WORKING)
     {
         return 1;
     }
-    control->name   = name;
-    control->sockfd = sockfd;
-    control->state  = WORKING;
-    control->resource_fd = resource_fd;
-    control->path = resname;
+    d->control->name   = d->name;
+    d->control->sockfd = d->sockfd;
+    d->control->state  = WORKING;
+    d->control->resource_fd = d->resource_fd;
+    d->control->path = d->resname;
     //signal for wakeup on semaphore
     
-    pthread_create(control->thread,NULL,worker_pool.task,(void*)control);
+    pthread_create(d->control->thread,NULL,worker_pool.task,(void*)d->control);
 //    printf("Signalling to start worker thread at cond: %p\n",control->tcb_cond);
-    pthread_cond_signal(control->tcb_cond);
+#ifdef USE_MONITOR
+    monitor_cond_signal(&d->control->tcb_cond);
+#else
+    pthread_cond_signal(&d->control->tcb_cond);
+#endif
     return 1;
-}
-
-int create_worker_pool(void *task, int size)
-{
-    worker_pool.workers = calloc(size,sizeof(tcb**));
-    worker_pool.size    = size;
-    worker_pool.task    = task;
-    int i =0;
-    for (i=0;i<size;i++)
-    {
-        tcb* worker = calloc(1,sizeof(tcb));
-        worker_pool.workers[i] = worker;
-
-        worker->state        = UNINITIALIZED;
-    }
-    return 0;
 }
 
 void initialize_workers()
@@ -267,52 +308,41 @@ void initialize_workers()
         if(worker->state == UNINITIALIZED)
         {
         worker->state               = IDLE;
-        worker->tcb_lock            = &worker_pool.lock;
-        worker->buffer_lock         = &circular_buffer.lock;
-        worker->buffer_cond         = &circular_buffer.producer_cond;
-        worker->buffer_empty_cond   = &circular_buffer.consumer_cond;
-
         worker->buffer       = circular_buffer.cb;
-
-        worker->tcb_cond     = calloc(1,sizeof(pthread_cond_t));
         worker->thread       = calloc(1,sizeof(pthread_t));
-
-        pthread_cond_init(worker->tcb_cond,NULL);
+#ifdef USE_MONITOR
+        monitor_cond_init(&worker->tcb_cond, &circular_buffer.lock);
+#else
+        pthread_cond_init(&worker->tcb_cond,NULL);
+#endif
         }
     }
 }
 
-int assign_worker (int name, int sockfd, int resource_fd,char* resname)
-{
-    //Assigns a worker to the job specified by the arguments from pool; assumes
-    //pool is not full. From a synchronization standpoint, it would also be
-    //reasonable to have this entire call be wrapped in lock acquisitions,
-    //rather than just acquiring the lock before dispatching, if we're
-    //concerned about changes to the thread pool state occurring during
-    //our attempt.
+struct create_worker_pool_struct {
+  void *task;
+  int size;
+};
 
-    int i = 0;
-    for (i = 0 ; i< worker_pool.size; i++)
+int create_worker_pool(struct create_worker_pool_struct *c)
+{
+    worker_pool.workers = calloc(c->size,sizeof(tcb**));
+    worker_pool.size    = c->size;
+    worker_pool.task    = c->task;
+    int i;
+    for (i = 0; i < c->size; i++)
     {
-        if (worker_pool.workers[i]->state == IDLE)
-        {
-            break;
-        }
+        tcb* worker = calloc(1,sizeof(tcb));
+        worker_pool.workers[i] = worker;
+
+        worker->state        = UNINITIALIZED;
     }
-    
-    if (i == worker_pool.size)
-    {
-        pthread_mutex_lock(&worker_pool.lock);
-        pool_grow();
-        pthread_mutex_unlock(&worker_pool.lock);
-        return assign_worker(name,sockfd,resource_fd,resname);
-    }
-    pthread_mutex_lock(&worker_pool.lock);
-    dispatch(worker_pool.workers[i], name, sockfd, resource_fd,resname);
-    pthread_mutex_unlock(&worker_pool.lock);
+    initialize_workers();
     return 0;
 }
-int pool_grow (void)
+
+
+int pool_grow (void __attribute__((unused)) *a)
 {
     tcb **newmem = realloc(worker_pool.workers, (2 * worker_pool.size * sizeof(tcb *)));
     if (newmem)
@@ -341,12 +371,64 @@ int pool_shrink (void)
     return 1;
 }
 
-flat_buffer* dispatcher_copybuffer()
+int assign_worker (int name, int sockfd, int resource_fd,char* resname)
+{
+    //Assigns a worker to the job specified by the arguments from pool; assumes
+    //pool is not full. From a synchronization standpoint, it would also be
+    //reasonable to have this entire call be wrapped in lock acquisitions,
+    //rather than just acquiring the lock before dispatching, if we're
+    //concerned about changes to the thread pool state occurring during
+    //our attempt.
+
+    int i = 0;
+    for (i = 0 ; i< worker_pool.size; i++)
+    {
+        if (worker_pool.workers[i]->state == IDLE)
+        {
+            break;
+        }
+    }
+    
+    if (i == worker_pool.size)
+    {
+#ifdef USE_MONITOR
+        monitor_run_fn(&worker_pool.lock, (void * (*)(void *))pool_grow, NULL);
+#else
+        pthread_mutex_lock(&worker_pool.lock);
+        pool_grow(NULL);
+        pthread_mutex_unlock(&worker_pool.lock);
+#endif
+        return assign_worker(name,sockfd,resource_fd,resname);
+    }
+    struct dispatch_struct d = {
+      .control = worker_pool.workers[i],
+      .name = name,
+      .sockfd = sockfd,
+      .resource_fd = resource_fd,
+      .resname = resname,
+    };
+#ifdef USE_MONITOR
+    monitor_run_fn(&worker_pool.lock, (void * (*)(void *))dispatch, &d);
+#else
+    pthread_mutex_lock(&worker_pool.lock);
+    dispatch(&d);
+    pthread_mutex_unlock(&worker_pool.lock);
+#endif
+    return 0;
+}
+
+
+flat_buffer* dispatcher_copybuffer (void __attribute__((unused)) *a)
 {
   while (circBuff_isEmpty(circular_buffer.cb)) {
     printf("dispatcher in copybuffer, buffer empty, waiting on consumer_cond\n");
-    int err;        
-    if (err = pthread_cond_wait(&circular_buffer.consumer_cond,&circular_buffer.lock)) {
+
+#ifdef USE_MONITOR
+    int err = (int)(long) monitor_cond_wait(&circular_buffer.consumer_cond);
+#else
+    int err = pthread_cond_wait(&circular_buffer.consumer_cond,&circular_buffer.lock);
+#endif
+    if (err) {
       printf("pthread_cond_wait failed in dispatcher, error code:%d",err);
       return 0;
     }
@@ -364,25 +446,9 @@ flat_buffer* dispatcher_copybuffer()
 
 }
 
-int dispatcher_thread(void __attribute__ ((unused)) *arg)
-{
-    while(1)
-    {
-        printf("in dispatcher,trying to acquire circular_buffer.lock\n");
-        pthread_mutex_lock(&circular_buffer.lock);
-        printf("in dispatcher,got circular_buffer.lock\n");
-
-        //BEGIN CRITICAL 
-        printf("dispatcher About to enter copybuffer\n");
-        flat_buffer* flat_buff = dispatcher_copybuffer();
-        printf("dispatcher Finished copybuffer\n");
-        pthread_cond_broadcast(&circular_buffer.producer_cond);
-        pthread_mutex_unlock(&circular_buffer.lock);
-        printf("In dispatcher, released lock\n");
-        //END CRITICAL
-       //Perform noncritical section
-        dispatcher_transmit(flat_buff);
-    }
+void *shinitai (text_frame *t) {
+  t->owner->state = SHINITAI;
+  return NULL;
 }
 
 void dispatcher_transmit(flat_buffer* flat_buff) {
@@ -399,17 +465,25 @@ void dispatcher_transmit(flat_buffer* flat_buff) {
     if(send(frame_sockfd, &len, sizeof(int),MSG_DONTWAIT|MSG_NOSIGNAL)==-1)
     {
         printf("dispatcher Send failed length!\n");
+#ifdef USE_MONITOR
+        monitor_run_fn(&worker_pool.lock, (void * (*)(void *))shinitai, from_buff[k]);
+#else
         pthread_mutex_lock(&worker_pool.lock);
-        from_buff[k]->owner->state = SHINITAI;
+        shinitai(from_buff[k]);
         pthread_mutex_unlock(&worker_pool.lock);
+#endif
     }
     
     if(send(frame_sockfd, frame_text, len,MSG_DONTWAIT|MSG_NOSIGNAL)==-1)
     {
         printf("dispatcher Send failed!\n");
+#ifdef USE_MONITOR
+        monitor_run_fn(&worker_pool.lock, (void * (*)(void *))shinitai, from_buff[k]);
+#else
         pthread_mutex_lock(&worker_pool.lock);
-        from_buff[k]->owner->state = SHINITAI;
+        shinitai(from_buff[k]);
         pthread_mutex_unlock(&worker_pool.lock);
+#endif
     }
     free_text_frame(from_buff[k]);
   }
@@ -417,7 +491,33 @@ void dispatcher_transmit(flat_buffer* flat_buff) {
   free(flat_buff);
 }
 
-int server_thread(void* args) {
+void *dispatcher_thread(void __attribute__ ((unused)) *arg)
+{
+    while(1)
+    {
+        printf("dispatcher About to enter copybuffer\n");
+#ifdef USE_MONITOR
+        flat_buffer *flat_buff = monitor_run_fn(&circular_buffer.lock, (void * (*)(void *))dispatcher_copybuffer, NULL);
+#else
+        pthread_mutex_lock(&circular_buffer.lock);
+        flat_buffer *flat_buff = dispatcher_copybuffer(NULL);
+        pthread_mutex_unlock(&circular_buffer.lock);
+#endif
+        printf("dispatcher Finished copybuffer\n");
+#ifdef USE_MONITOR
+        monitor_cond_broadcast(&circular_buffer.producer_cond);
+#else
+        pthread_cond_broadcast(&circular_buffer.producer_cond);
+#endif
+        printf("In dispatcher, released lock\n");
+        //END CRITICAL
+       //Perform noncritical section
+        dispatcher_transmit(flat_buff);
+    }
+}
+
+
+void *server_thread(void* args) {
   //8080 is the default port, the user can change this at runtime though
   int PORT = *(int*)args;
   int server_socket = make_server_socket(PORT);
@@ -453,23 +553,33 @@ int server_thread(void* args) {
 
 int main (void)
 {
+
+    circular_buffer.cb = circBuff_init(100);
     
     //Begin initializing global locks and conds
+#ifdef USE_MONITOR
+    monitor_init(&circular_buffer.lock);
+    monitor_cond_init(&circular_buffer.producer_cond, &circular_buffer.lock);
+    monitor_cond_init(&circular_buffer.consumer_cond, &circular_buffer.lock);
+    monitor_init(&worker_pool.lock);
+#else
     pthread_mutex_init(&circular_buffer.lock,NULL);
     pthread_cond_init(&circular_buffer.producer_cond, NULL);
     pthread_cond_init(&circular_buffer.consumer_cond, NULL);
-    circular_buffer.cb = circBuff_init(100);
-
     pthread_mutex_init(&worker_pool.lock,NULL);
+#endif
+    struct create_worker_pool_struct c = {
+      .task = text_producer,
+      .size = 1,
+    };
+#ifdef USE_MONITOR
+    monitor_run_fn(&worker_pool.lock, (void * (*)(void *))create_worker_pool, &c);
+#else
     pthread_mutex_lock(&worker_pool.lock);
-    create_worker_pool(text_producer,1);
-    initialize_workers();
+    create_worker_pool(&c);
     pthread_mutex_unlock(&worker_pool.lock);
+#endif
 
-
-
-    int i;
-    
     pthread_t disp_thread;
     pthread_t serv_thread;
 
