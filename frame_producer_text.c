@@ -88,7 +88,7 @@ rbuff_ret* get_jpeg_data(char* path,int index)
         return 0;
         }
         else
-            return -1;
+          return (rbuff_ret *)-1;
     }
 //    printf("Opened file in jpeg, fd:%d,path:%s\n",fd,filename);
     int rsize = 2048;
@@ -187,7 +187,7 @@ int text_producer(void* _block)
         text_frame *frame = calloc(1,sizeof(text_frame));	
     //    sleep(1);
         rbuff_ret *image_data = get_jpeg_data(block->path,framenum); 
-        if (image_data == -1)
+        if (image_data == (rbuff_ret *)-1)
         {
             framenum=0;
             image_data = get_jpeg_data(block->path,framenum);
@@ -282,6 +282,35 @@ void initialize_workers()
     }
 }
 
+int pool_grow (void)
+{
+    tcb **newmem = realloc(worker_pool.workers, (2 * worker_pool.size * sizeof(tcb *)));
+    if (newmem)
+    {
+        worker_pool.workers= newmem;
+        int i=0;
+        for (i=worker_pool.size;i<worker_pool.size*2;i++)
+        {
+            printf("growing:%d\n",i);
+            worker_pool.workers[i] = calloc(1,sizeof(tcb));
+            worker_pool.workers[i]->state = UNINITIALIZED;
+        }
+        worker_pool.size *= 2;
+        initialize_workers();
+    }
+    else
+    {
+        return 1;
+    }
+    return 0;
+}
+
+int pool_shrink (void)
+{
+    //Not implemented yet, if ever.
+    return 1;
+}
+
 int assign_worker (int name, int sockfd, int resource_fd)
 {
     //Assigns a worker to the job specified by the arguments from pool; assumes
@@ -312,41 +341,14 @@ int assign_worker (int name, int sockfd, int resource_fd)
     pthread_mutex_unlock(&worker_pool.lock);
     return 0;
 }
-int pool_grow (void)
-{
-    tcb **newmem = realloc(worker_pool.workers, (2 * worker_pool.size * sizeof(tcb *)));
-    if (newmem)
-    {
-        worker_pool.workers= newmem;
-        int i=0;
-        for (i=worker_pool.size;i<worker_pool.size*2;i++)
-        {
-            printf("growing:%d\n",i);
-            worker_pool.workers[i] = calloc(1,sizeof(tcb));
-            worker_pool.workers[i]->state = UNINITIALIZED;
-        }
-        worker_pool.size *= 2;
-        initialize_workers();
-    }
-    else
-    {
-        return 1;
-    }
-    return 0;
-}
 
-int pool_shrink (void)
-{
-    //Not implemented yet, if ever.
-    return 1;
-}
 
 flat_buffer* dispatcher_copybuffer()
 {
   while (circBuff_isEmpty(circular_buffer.cb)) {
     printf("dispatcher in copybuffer, buffer empty, waiting on consumer_cond\n");
-    int err;        
-    if (err = pthread_cond_wait(&circular_buffer.consumer_cond,&circular_buffer.lock)) {
+    int err = pthread_cond_wait(&circular_buffer.consumer_cond,&circular_buffer.lock);
+    if (err) {
       printf("pthread_cond_wait failed in dispatcher, error code:%d",err);
       return 0;
     }
@@ -362,27 +364,6 @@ flat_buffer* dispatcher_copybuffer()
   flat->from_buff=from_buff;
   return flat;
 
-}
-
-int dispatcher_thread(void __attribute__ ((unused)) *arg)
-{
-    while(1)
-    {
-        printf("in dispatcher,trying to acquire circular_buffer.lock\n");
-        pthread_mutex_lock(&circular_buffer.lock);
-        printf("in dispatcher,got circular_buffer.lock\n");
-
-        //BEGIN CRITICAL 
-        printf("dispatcher About to enter copybuffer\n");
-        flat_buffer* flat_buff = dispatcher_copybuffer();
-        printf("dispatcher Finished copybuffer\n");
-        pthread_cond_broadcast(&circular_buffer.producer_cond);
-        pthread_mutex_unlock(&circular_buffer.lock);
-        printf("In dispatcher, released lock\n");
-        //END CRITICAL
-       //Perform noncritical section
-        dispatcher_transmit(flat_buff);
-    }
 }
 
 void dispatcher_transmit(flat_buffer* flat_buff) {
@@ -417,7 +398,29 @@ void dispatcher_transmit(flat_buffer* flat_buff) {
   free(flat_buff);
 }
 
-int server_thread(void* args) {
+void *dispatcher_thread(void __attribute__ ((unused)) *arg)
+{
+    while(1)
+    {
+        printf("in dispatcher,trying to acquire circular_buffer.lock\n");
+        pthread_mutex_lock(&circular_buffer.lock);
+        printf("in dispatcher,got circular_buffer.lock\n");
+
+        //BEGIN CRITICAL
+        printf("dispatcher About to enter copybuffer\n");
+        flat_buffer* flat_buff = dispatcher_copybuffer();
+        printf("dispatcher Finished copybuffer\n");
+        pthread_cond_broadcast(&circular_buffer.producer_cond);
+        pthread_mutex_unlock(&circular_buffer.lock);
+        printf("In dispatcher, released lock\n");
+        //END CRITICAL
+       //Perform noncritical section
+        dispatcher_transmit(flat_buff);
+    }
+}
+
+
+void *server_thread(void* args) {
   //8080 is the default port, the user can change this at runtime though
   int PORT = *(int*)args;
   int server_socket = make_server_socket(PORT);
@@ -461,10 +464,6 @@ int main (void)
     initialize_workers();
     pthread_mutex_unlock(&worker_pool.lock);
 
-
-
-    int i;
-    
     pthread_t disp_thread;
     pthread_t serv_thread;
 
