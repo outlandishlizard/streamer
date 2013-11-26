@@ -10,7 +10,6 @@ circBuff* circBuff_init(int size)
     buffer->read	= 0;
 	buffer->write	= 0;
 	buffer->size	= size;
-	//printf("buffer->size in create:%d", buffer->size);
     return buffer;
 }
 
@@ -51,7 +50,6 @@ int* circBuff_pop(circBuff *buffer)
 	}
 	else
 	{
-        printf("Write:%d Read%d\n",buffer->write,buffer->read);
         fflush(stdout);
         int *ret;
 		ret = buffer->base[buffer->read];
@@ -60,26 +58,4 @@ int* circBuff_pop(circBuff *buffer)
 	}
 	
 }
-/*
-int main (int argc, char** argv)
-{
-	circBuff* buffer = circBuff_init(100);
-	int i = 0;
-	int array[10] = {1,2,3,4,5,6,7,8,9,10};	
-	for (i=1;i<100;i++)
-	{
-		int ret =0;
-		ret = circBuff_push(buffer,array+(i%10));
-		printf("%d,%x,%x\n",ret,array+(i%10),buffer->write);
-	}
 
-	for (i=0;i<100;i++)
-	{
-		int* x;
-		int y;
-		x = (circBuff_pop(&buffer));
-		y = buffer->read;
-		printf("Pop:%x,%x,%x\n",x,y,array);
-	}
-	exit(1);
-}*/

@@ -230,7 +230,7 @@ int text_producer(void* _block)
         // Else build the frame for writing
     //    char* text_string = (char*)calloc(512,sizeof(char));
       //  snprintf(text_string, (size_t)512,"Text Producer %d:%d", block->name, framenum);
-        sleep(1);
+        usleep(250000);
         text_frame *frame = calloc(1,sizeof(text_frame));	
     //    sleep(1);
 #ifdef USE_TEXT
@@ -545,9 +545,13 @@ void *server_thread(void* args) {
 
 
 
-int main (void)
+int main (int argc,char**argv)
 {
-
+    if (argc < 2)
+        {
+            printf("Usage: frame_test <pool size>\n");
+            exit(1);
+        }
     circular_buffer.cb = circBuff_init(100);
     
     //Begin initializing global locks and conds
@@ -564,7 +568,7 @@ int main (void)
 #endif
     struct create_worker_pool_struct c = {
       .task = text_producer,
-      .size = 1,
+      .size = atoi(argv[1]),
     };
 #ifdef USE_MONITOR
     monitor_run_fn(&worker_pool.lock, (void * (*)(void *))create_worker_pool, &c);

@@ -28,7 +28,6 @@ class Sock:
     client_sock.send_msg(struct.pack('!i', int(l)))
     client_sock.send_msg(sys.argv[3])
 
-#    return self.sock.recv(size,socket.MSG_WAITALL)
   def close(self):
     return self.sock.close()
 
@@ -53,6 +52,7 @@ if __name__ == "__main__":
     print "Error connecting:", sys.exc_info()[0]
     raise
   else:
+    print "Usage: 0\\n<frame> = seek,1\\n = play/pause 2\\n = die"
     paused = 1
     # Get input from user, send it over the socket, read response
     while True:
@@ -68,15 +68,15 @@ if __name__ == "__main__":
 
         frame_file = io.BytesIO('frame')
         if(paused > 0):
-            length = client_sock.get_msg(4)
-            length= struct.unpack('I',length)[0]
-            data = client_sock.get_msg(length)
-            f = open('./got','w+')
-            f.write(data)
-            f.close()
-            frame_file.write(data)
-            client_process(frame_file)
-            frame_file.close()
+          length = client_sock.get_msg(4)
+          length= struct.unpack('I',length)[0]
+          data = client_sock.get_msg(length)
+          f = open('./got','w+')
+          f.write(data)
+          f.close()
+          frame_file.write(data)
+          client_process(frame_file)
+          frame_file.close()
       except SystemExit:
         exit()
       except KeyboardInterrupt:

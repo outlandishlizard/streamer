@@ -11,9 +11,9 @@
 
 // #define USE_MONITOR
 
-/* Commented:   stream text */
-/* Uncommented: stream video */
+/* Commented:   stream video */
+/* Uncommented: stream text */
 
-// #define STREAM_VIDEO
+// #define USE_TEXT
 
 #endif
