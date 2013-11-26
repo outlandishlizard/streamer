@@ -73,7 +73,7 @@ void free_text_frame(text_frame *tf)
     free(tf);
 }
 
-char* get_jpeg_data(char* path,int index)
+rbuff_ret* get_jpeg_data(char* path,int index)
 {
 //    printf("In get_jpeg_data\n");
     char* filename = calloc(256,sizeof(char));
@@ -88,7 +88,7 @@ char* get_jpeg_data(char* path,int index)
         return 0;
         }
         else
-            return get_jpeg_data(path,0);
+            return -1;
     }
 //    printf("Opened file in jpeg, fd:%d,path:%s\n",fd,filename);
     int rsize = 2048;
@@ -183,6 +183,16 @@ int text_producer(void* _block)
         text_frame *frame = calloc(1,sizeof(text_frame));	
     //    sleep(1);
         rbuff_ret *image_data = get_jpeg_data(block->path,framenum); 
+        if (image_data == -1)
+        {
+            framenum=0;
+            image_data = get_jpeg_data(block->path,framenum);
+            if (image_data == 0)
+            {
+               block->state = SHINITAI; 
+               continue;
+            }
+        }
         frame->priority = block->name;
         frame->owner = block;
         frame->text = image_data->text;
