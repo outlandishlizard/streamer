@@ -15,15 +15,15 @@ class Sock:
   def send_msg(self, msg):
     self.sock.send(msg)
   def get_msg(self, size):
-    return self.sock.recv(size)
+    return self.sock.recv(size,socket.MSG_WAITALL)
   def close(self):
     return self.sock.close()
 
 def client_process(data_frame):
   data_frame.seek(0)
   frame = pygame.image.load(data_frame)
-  displaySurface.blit(frame)
-
+  displaySurface.blit(frame,(0,0))
+  pygame.display.flip()
 if __name__ == "__main__":
   pygame.init()
   displaySurface = pygame.display.set_mode((256,256),pygame.DOUBLEBUF)
@@ -43,8 +43,13 @@ if __name__ == "__main__":
     while True:
       try:
         frame_file = io.BytesIO('frame')  
-        data = client_sock.get_msg(4096)
-#        data = data[::-1]
+        print "in try"
+        length= client_sock.get_msg(4)
+        length= struct.unpack('i',length)[0]
+        print "got len"
+        print length
+        data = client_sock.get_msg(length)
+        print data
         f = open('./got','w+')
         f.write(data)
         f.close()
