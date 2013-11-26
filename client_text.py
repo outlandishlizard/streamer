@@ -24,9 +24,9 @@ class Sock:
       gotten = len(strgot)
     return strgot
   def send_hello(self):
-    l = len(sys.argv[3])
+    l = len('./')
     client_sock.send_msg(struct.pack('!i', int(l)))
-    client_sock.send_msg(sys.argv[3])
+    client_sock.send_msg('./')
 
   def close(self):
     return self.sock.close()
@@ -35,8 +35,8 @@ def client_process(data_frame):
     print data_frame
 if __name__ == "__main__":
     # Check that host and port were included as args
-  if len(sys.argv) != 4:
-    print "Incorrect usage. ./server <host> <port> <videoname>"
+  if len(sys.argv) != 3:
+    print "Incorrect usage. ./server <host> <port>"
     exit(1)
   try:
     # Make a new socket, passing host and port as params
