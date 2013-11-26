@@ -1,0 +1,19 @@
+CS 552 A1 Homework 2: Text/Video Server
+-------------
+Group Members: 
+Danny Cooper (serverside datastructures, synchronization, video functionality),
+George Silvis III (monitor/kernel module),
+Andrew Mohn (netcode/client code)
+-------------
+Build Instructions:
+make frame_test
+modify global_config.h as you desire to enable/disable different functionalities (comments in file)
+-------------
+Run Instructions:
+./frame_test to start server
+python client.py localhost 8080 <videoname>
+(use client_text.py without the final argument for text clients)
+-------------
+Notes:
+The video server can serve folders full of jpegs with the naming convention frame-<number>.jpeg
+
