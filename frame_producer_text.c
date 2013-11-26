@@ -18,12 +18,7 @@ typedef struct {
     int sockfd;
     int resource_fd;
     char* path;   
-    pthread_cond_t *buffer_cond;
-    pthread_cond_t *buffer_empty_cond;
-    pthread_cond_t *tcb_cond;
-
-    pthread_mutex_t *buffer_lock;
-    pthread_mutex_t *tcb_lock;
+    pthread_cond_t tcb_cond;
     circBuff *buffer;
 } tcb;
 
@@ -158,7 +153,7 @@ int text_producer(void* _block)
         {
             int err;
             pthread_mutex_lock(&worker_pool.lock);
-            err = pthread_cond_wait(block->tcb_cond, &worker_pool.lock);
+            err = pthread_cond_wait(&block->tcb_cond, &worker_pool.lock);
             pthread_mutex_unlock(&worker_pool.lock);
             if (err)
             {
@@ -260,7 +255,7 @@ int dispatch(struct dispatch_struct *d)
     
     pthread_create(d->control->thread,NULL,worker_pool.task,(void*)d->control);
 //    printf("Signalling to start worker thread at cond: %p\n",control->tcb_cond);
-    pthread_cond_signal(d->control->tcb_cond);
+    pthread_cond_signal(&d->control->tcb_cond);
     return 1;
 }
 
@@ -274,17 +269,9 @@ void initialize_workers()
         if(worker->state == UNINITIALIZED)
         {
         worker->state               = IDLE;
-        worker->tcb_lock            = &worker_pool.lock;
-        worker->buffer_lock         = &circular_buffer.lock;
-        worker->buffer_cond         = &circular_buffer.producer_cond;
-        worker->buffer_empty_cond   = &circular_buffer.consumer_cond;
-
         worker->buffer       = circular_buffer.cb;
-
-        worker->tcb_cond     = calloc(1,sizeof(pthread_cond_t));
         worker->thread       = calloc(1,sizeof(pthread_t));
-
-        pthread_cond_init(worker->tcb_cond,NULL);
+        pthread_cond_init(&worker->tcb_cond,NULL);
         }
     }
 }
