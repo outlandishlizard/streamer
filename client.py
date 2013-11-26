@@ -43,26 +43,23 @@ if __name__ == "__main__":
     # Get input from user, send it over the socket, read response
     while True:
       try:
-        frame_file = io.BytesIO('frame')  
-        print "in try"
-        length= client_sock.get_msg(4)
-        length= struct.unpack('i',length)[0]
-        print "got len"
-        print length
-        data = client_sock.get_msg(length)
-        print data
-        f = open('./got','w+')
-        f.write(data)
-        f.close()
-        frame_file.write(data)
-        client_process(frame_file)
-        frame_file.close()
         if sys.stdin in select.select([sys.stdin], [], [], 0)[0]:
           r = sys.stdin.readline().rstrip()
           if r:
             client_sock.send_msg(struct.pack('!i', int(r)))
           else:
             print "Invalid command"
+
+        frame_file = io.BytesIO('frame')  
+        length= client_sock.get_msg(4)
+        length= struct.unpack('i',length)[0]
+        data = client_sock.get_msg(length)
+        f = open('./got','w+')
+        f.write(data)
+        f.close()
+        frame_file.write(data)
+        client_process(frame_file)
+        frame_file.close()
       except SystemExit:
         exit()
       except KeyboardInterrupt:
