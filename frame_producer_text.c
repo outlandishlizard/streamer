@@ -1,4 +1,3 @@
-#define USE_TEXT
 #include "global_config.h"
 #ifdef USE_MONITOR
 # include "monitor.h"
