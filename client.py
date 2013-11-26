@@ -1,3 +1,5 @@
+#!/usr/bin/python
+
 import pygame
 import socket
 import sys
@@ -61,7 +63,12 @@ if __name__ == "__main__":
 
         frame_file = io.BytesIO('frame')
         if(paused > 0):
-            length= client_sock.get_msg(4)
+            length = ''
+            county = 4
+            while len(length) != 4:
+                length = client_sock.get_msg(county)
+                county -= len(length)
+            print len(length)
             length= struct.unpack('i',length)[0]
             data = client_sock.get_msg(length)
             f = open('./got','w+')
