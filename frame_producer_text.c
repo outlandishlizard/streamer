@@ -151,9 +151,9 @@ int text_producer(void* _block)
 	int command = -1;
 	int jump = 0;
     if (!paused)
-	recv(block->sockfd, &command, sizeof(int) , MSG_DONTWAIT|MSG_NOSIGNAL);
+	recv(block->sockfd, &command, sizeof(int) , MSG_DONTWAIT);
     else
-	recv(block->sockfd, &command, sizeof(int) , MSG_NOSIGNAL);
+	recv(block->sockfd, &command, sizeof(int) , 0);
 	command = ntohl(command);
 	printf("Command:%d\n",command);
     switch(command) {

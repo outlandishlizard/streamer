@@ -40,6 +40,7 @@ if __name__ == "__main__":
     print "Error connecting:", sys.exc_info()[0]
     raise
   else:
+    paused = 1
     # Get input from user, send it over the socket, read response
     while True:
       try:
@@ -47,19 +48,22 @@ if __name__ == "__main__":
           r = sys.stdin.readline().rstrip()
           if r:
             client_sock.send_msg(struct.pack('!i', int(r)))
+            print "Sent: "+r
+            paused*=-1
           else:
             print "Invalid command"
 
-        frame_file = io.BytesIO('frame')  
-        length= client_sock.get_msg(4)
-        length= struct.unpack('i',length)[0]
-        data = client_sock.get_msg(length)
-        f = open('./got','w+')
-        f.write(data)
-        f.close()
-        frame_file.write(data)
-        client_process(frame_file)
-        frame_file.close()
+        frame_file = io.BytesIO('frame')
+        if(paused > 0):
+            length= client_sock.get_msg(4)
+            length= struct.unpack('i',length)[0]
+            data = client_sock.get_msg(length)
+            f = open('./got','w+')
+            f.write(data)
+            f.close()
+            frame_file.write(data)
+            client_process(frame_file)
+            frame_file.close()
       except SystemExit:
         exit()
       except KeyboardInterrupt:
