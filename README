@@ -17,3 +17,8 @@ python client.py localhost 8080 <videoname>
 Notes:
 The video server can serve folders full of jpegs with the naming convention frame-<number>.jpeg
 
+PS: For more part III documentation, see monitor.c, module/mythread.c,
+mythread.c, and associated header files.  Don't try to just compile and insmod
+the module---it probably won't work.  That's because the syscall number and
+location of the syscall_table symbol are hardcoded in syscall_config.h .  It
+has instructions for determining the right value.
