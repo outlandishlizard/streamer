@@ -222,7 +222,7 @@ int text_producer(void* _block)
 
 }
 
-int dispatch(tcb* control,int name,int sockfd,int resource_fd)
+int dispatch(tcb* control,int name,int sockfd,int resource_fd,char* resname)
 {
     if (control->state == WORKING)
     {
@@ -232,7 +232,7 @@ int dispatch(tcb* control,int name,int sockfd,int resource_fd)
     control->sockfd = sockfd;
     control->state  = WORKING;
     control->resource_fd = resource_fd;
-    control->path = "./testvideo/";
+    control->path = resname;
     //signal for wakeup on semaphore
     
     pthread_create(control->thread,NULL,worker_pool.task,(void*)control);
@@ -311,7 +311,7 @@ int pool_shrink (void)
     return 1;
 }
 
-int assign_worker (int name, int sockfd, int resource_fd)
+int assign_worker (int name, int sockfd, int resource_fd,char* resname)
 {
     //Assigns a worker to the job specified by the arguments from pool; assumes
     //pool is not full. From a synchronization standpoint, it would also be
@@ -334,10 +334,10 @@ int assign_worker (int name, int sockfd, int resource_fd)
         pthread_mutex_lock(&worker_pool.lock);
         pool_grow();
         pthread_mutex_unlock(&worker_pool.lock);
-        return assign_worker(name,sockfd,resource_fd);
+        return assign_worker(name,sockfd,resource_fd,resname);
     }
     pthread_mutex_lock(&worker_pool.lock);
-    dispatch(worker_pool.workers[i], name, sockfd, resource_fd);
+    dispatch(worker_pool.workers[i], name, sockfd, resource_fd,resname);
     pthread_mutex_unlock(&worker_pool.lock);
     return 0;
 }
@@ -440,7 +440,12 @@ void *server_thread(void* args) {
     // Fork a process for handling the request
     // Will later change this to giving to a thread
     // Parent just continues the loop, wainting for another client
-    assign_worker(i,client_socket,0);
+    char* requestname;
+    int requestsize=0;
+	recv(client_socket, &requestsize, sizeof(int) , 0);
+    requestname = calloc(requestsize,sizeof(char));
+    recv(client_socket, requestname, requestsize,0);
+    assign_worker(i,client_socket,0,requestname);
   }
   // The main loop is over, so close the socket and finish up
   close(server_socket);
