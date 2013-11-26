@@ -69,7 +69,7 @@ if __name__ == "__main__":
                 length = client_sock.get_msg(county)
                 county -= len(length)
             print len(length)
-            length= struct.unpack('!i',length)[0]
+            length= struct.unpack('!I',length)[0]
             data = client_sock.get_msg(length)
             f = open('./got','w+')
             f.write(data)
