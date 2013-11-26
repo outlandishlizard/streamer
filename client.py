@@ -16,6 +16,11 @@ class Sock:
     self.sock.send(msg)
   def get_msg(self, size):
     return self.sock.recv(size)
+  def send_hello(self):
+    l = len(sys.argv[3])
+    client_sock.send_msg(struct.pack('!i', int(l)))
+    client_sock.send_msg(sys.argv[3])
+
 #    return self.sock.recv(size,socket.MSG_WAITALL)
   def close(self):
     return self.sock.close()
@@ -30,12 +35,13 @@ if __name__ == "__main__":
   displaySurface = pygame.display.set_mode((256,256),pygame.DOUBLEBUF)
      
     # Check that host and port were included as args
-  if len(sys.argv) != 3:
-    print "Incorrect usage. ./server <host> <port>"
+  if len(sys.argv) != 4:
+    print "Incorrect usage. ./server <host> <port> <videoname>"
     exit(1)
   try:
     # Make a new socket, passing host and port as params
     client_sock = Sock(sys.argv[1], int(sys.argv[2]))
+    client_sock.send_hello()
   except:
     print "Error connecting:", sys.exc_info()[0]
     raise
