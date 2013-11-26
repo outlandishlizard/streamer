@@ -1,3 +1,7 @@
+#include "global_config.h"
+#ifdef USE_MONITOR
+# include "monitor.h"
+#endif
 #include <pthread.h>
 #include <string.h>
 #include <stdlib.h>
@@ -18,7 +22,11 @@ typedef struct {
     int sockfd;
     int resource_fd;
     char* path;   
+#ifdef USE_MONITOR
+    struct monitor_cond tcb_cond;
+#else
     pthread_cond_t tcb_cond;
+#endif
     circBuff *buffer;
 } tcb;
 
@@ -26,15 +34,25 @@ typedef struct {
 struct {
     tcb **workers;
     int size;
+#ifdef USE_MONITOR
+    struct monitor lock;
+#else
     pthread_mutex_t lock;
+#endif
     void* task;
 } worker_pool;
 
 struct {
   circBuff *cb;
+#ifdef USE_MONITOR
+  struct monitor_cond producer_cond;
+  struct monitor_cond consumer_cond;
+  struct monitor lock;
+#else
   pthread_cond_t producer_cond;
   pthread_cond_t consumer_cond;
   pthread_mutex_t lock;
+#endif
 } circular_buffer;
 
 
@@ -118,12 +136,20 @@ int text_helper (struct text_helper_struct *s) {
         while (circBuff_push(circular_buffer.cb, s->frame))
         {
             //The buffer is full, or some other error state, we sleep until it isn't.
+#ifdef USE_MONITOR
+            monitor_cond_wait(&circular_buffer.producer_cond);
+#else
             pthread_cond_wait(&circular_buffer.producer_cond, &circular_buffer.lock);
+#endif
         }
         if (circBuff_isFull(s->block->buffer))
         {
             printf("signalling consumer_cond\n");
+#ifdef USE_MONITOR
+            monitor_cond_signal(&circular_buffer.consumer_cond);
+#else
             pthread_cond_signal(&circular_buffer.consumer_cond);
+#endif
         }
         (*(s->framenumber))++;
         return 0;
@@ -151,6 +177,10 @@ int text_producer(void* _block)
         //Check that we're in a state that we should be in, block until we are.
         while (block->state != WORKING)
         {
+
+#ifdef USE_MONITOR
+          monitor_run_fn(&worker_pool.lock, (void * (*)(void *))monitor_cond_wait, &block->tcb_cond);
+#else
             int err;
             pthread_mutex_lock(&worker_pool.lock);
             err = pthread_cond_wait(&block->tcb_cond, &worker_pool.lock);
@@ -160,6 +190,7 @@ int text_producer(void* _block)
                 printf("pthread_cond_wait failed in text_producer, error code:%d",err);
                 return 0;
             }
+#endif
         }
 
         //Begin actual text production.
@@ -224,9 +255,13 @@ int text_producer(void* _block)
           .block = block,
           .framenumber = &framenum,
         };
+#ifdef USE_MONITOR
+        monitor_run_fn(&circular_buffer.lock, (void * (*)(void *))text_helper, &t);
+#else
         pthread_mutex_lock(&circular_buffer.lock);
         text_helper(&t);
         pthread_mutex_unlock(&circular_buffer.lock);
+#endif
     }   
     return framenum;
 
@@ -255,7 +290,11 @@ int dispatch(struct dispatch_struct *d)
     
     pthread_create(d->control->thread,NULL,worker_pool.task,(void*)d->control);
 //    printf("Signalling to start worker thread at cond: %p\n",control->tcb_cond);
+#ifdef USE_MONITOR
+    monitor_cond_signal(&d->control->tcb_cond);
+#else
     pthread_cond_signal(&d->control->tcb_cond);
+#endif
     return 1;
 }
 
@@ -271,7 +310,11 @@ void initialize_workers()
         worker->state               = IDLE;
         worker->buffer       = circular_buffer.cb;
         worker->thread       = calloc(1,sizeof(pthread_t));
+#ifdef USE_MONITOR
+        monitor_cond_init(&worker->tcb_cond, &circular_buffer.lock);
+#else
         pthread_cond_init(&worker->tcb_cond,NULL);
+#endif
         }
     }
 }
@@ -348,9 +391,13 @@ int assign_worker (int name, int sockfd, int resource_fd,char* resname)
     
     if (i == worker_pool.size)
     {
+#ifdef USE_MONITOR
+        monitor_run_fn(&worker_pool.lock, (void * (*)(void *))pool_grow, NULL);
+#else
         pthread_mutex_lock(&worker_pool.lock);
         pool_grow(NULL);
         pthread_mutex_unlock(&worker_pool.lock);
+#endif
         return assign_worker(name,sockfd,resource_fd,resname);
     }
     struct dispatch_struct d = {
@@ -360,9 +407,13 @@ int assign_worker (int name, int sockfd, int resource_fd,char* resname)
       .resource_fd = resource_fd,
       .resname = resname,
     };
+#ifdef USE_MONITOR
+    monitor_run_fn(&worker_pool.lock, (void * (*)(void *))dispatch, &d);
+#else
     pthread_mutex_lock(&worker_pool.lock);
     dispatch(&d);
     pthread_mutex_unlock(&worker_pool.lock);
+#endif
     return 0;
 }
 
@@ -371,7 +422,12 @@ flat_buffer* dispatcher_copybuffer (void __attribute__((unused)) *a)
 {
   while (circBuff_isEmpty(circular_buffer.cb)) {
     printf("dispatcher in copybuffer, buffer empty, waiting on consumer_cond\n");
+
+#ifdef USE_MONITOR
+    int err = (int)(long) monitor_cond_wait(&circular_buffer.consumer_cond);
+#else
     int err = pthread_cond_wait(&circular_buffer.consumer_cond,&circular_buffer.lock);
+#endif
     if (err) {
       printf("pthread_cond_wait failed in dispatcher, error code:%d",err);
       return 0;
@@ -409,17 +465,25 @@ void dispatcher_transmit(flat_buffer* flat_buff) {
     if(send(frame_sockfd, &len, sizeof(int),MSG_DONTWAIT|MSG_NOSIGNAL)==-1)
     {
         printf("dispatcher Send failed length!\n");
+#ifdef USE_MONITOR
+        monitor_run_fn(&worker_pool.lock, (void * (*)(void *))shinitai, from_buff[k]);
+#else
         pthread_mutex_lock(&worker_pool.lock);
         shinitai(from_buff[k]);
         pthread_mutex_unlock(&worker_pool.lock);
+#endif
     }
     
     if(send(frame_sockfd, frame_text, len,MSG_DONTWAIT|MSG_NOSIGNAL)==-1)
     {
         printf("dispatcher Send failed!\n");
+#ifdef USE_MONITOR
+        monitor_run_fn(&worker_pool.lock, (void * (*)(void *))shinitai, from_buff[k]);
+#else
         pthread_mutex_lock(&worker_pool.lock);
         shinitai(from_buff[k]);
         pthread_mutex_unlock(&worker_pool.lock);
+#endif
     }
     free_text_frame(from_buff[k]);
   }
@@ -432,11 +496,19 @@ void *dispatcher_thread(void __attribute__ ((unused)) *arg)
     while(1)
     {
         printf("dispatcher About to enter copybuffer\n");
+#ifdef USE_MONITOR
+        flat_buffer *flat_buff = monitor_run_fn(&circular_buffer.lock, (void * (*)(void *))dispatcher_copybuffer, NULL);
+#else
         pthread_mutex_lock(&circular_buffer.lock);
-        flat_buffer* flat_buff = dispatcher_copybuffer(NULL);
+        flat_buffer *flat_buff = dispatcher_copybuffer(NULL);
         pthread_mutex_unlock(&circular_buffer.lock);
+#endif
         printf("dispatcher Finished copybuffer\n");
+#ifdef USE_MONITOR
+        monitor_cond_broadcast(&circular_buffer.producer_cond);
+#else
         pthread_cond_broadcast(&circular_buffer.producer_cond);
+#endif
         printf("In dispatcher, released lock\n");
         //END CRITICAL
        //Perform noncritical section
@@ -481,21 +553,32 @@ void *server_thread(void* args) {
 
 int main (void)
 {
+
+    circular_buffer.cb = circBuff_init(100);
     
     //Begin initializing global locks and conds
+#ifdef USE_MONITOR
+    monitor_init(&circular_buffer.lock);
+    monitor_cond_init(&circular_buffer.producer_cond, &circular_buffer.lock);
+    monitor_cond_init(&circular_buffer.consumer_cond, &circular_buffer.lock);
+    monitor_init(&worker_pool.lock);
+#else
     pthread_mutex_init(&circular_buffer.lock,NULL);
     pthread_cond_init(&circular_buffer.producer_cond, NULL);
     pthread_cond_init(&circular_buffer.consumer_cond, NULL);
-    circular_buffer.cb = circBuff_init(100);
-
     pthread_mutex_init(&worker_pool.lock,NULL);
+#endif
     struct create_worker_pool_struct c = {
       .task = text_producer,
       .size = 1,
     };
+#ifdef USE_MONITOR
+    monitor_run_fn(&worker_pool.lock, (void * (*)(void *))create_worker_pool, &c);
+#else
     pthread_mutex_lock(&worker_pool.lock);
     create_worker_pool(&c);
     pthread_mutex_unlock(&worker_pool.lock);
+#endif
 
     pthread_t disp_thread;
     pthread_t serv_thread;

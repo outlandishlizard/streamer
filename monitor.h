@@ -40,12 +40,13 @@ struct monitor_cond {
 
 int monitor_init (struct monitor *m);
 int monitor_cond_init (struct monitor_cond *c, struct monitor *monitor);
-void monitor_destroy (struct monitor *m);
-void monitor_cond_destroy (struct monitor_cond *c);
+void *monitor_destroy (struct monitor *m);
+void *monitor_cond_destroy (struct monitor_cond *c);
 void *monitor_run_fn (struct monitor *m,
                       void *(*f)(void *),
                       void *user_data);
-void monitor_cond_wait (struct monitor_cond *c);
-void monitor_cond_signal (struct monitor_cond *c);
+void *monitor_cond_wait (struct monitor_cond *c);
+void *monitor_cond_signal (struct monitor_cond *c);
+void *monitor_cond_broadcast (struct monitor_cond *c);
 
 #endif
