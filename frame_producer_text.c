@@ -135,14 +135,15 @@ int text_producer(void* _block)
         //Check that we're in a state that we should be in, block until we are.
         while (block->state != WORKING)
         {
+            int err;
             pthread_mutex_lock(&worker_pool.lock);
-            int err = pthread_cond_wait(block->tcb_cond, &worker_pool.lock);
+            err = pthread_cond_wait(block->tcb_cond, &worker_pool.lock);
+            pthread_mutex_unlock(&worker_pool.lock);
             if (err)
             {
                 printf("pthread_cond_wait failed in text_producer, error code:%d",err);
                 return 0;
             }
-            pthread_mutex_unlock(&worker_pool.lock);
         }
 
         //Begin actual text production.
@@ -202,7 +203,7 @@ int text_producer(void* _block)
         frame->text = image_data->text;
         frame->length= image_data->length;
         free(image_data);
-//        pthread_mutex_lock(&circular_buffer.lock);
+        pthread_mutex_lock(&circular_buffer.lock);
         printf("In worker, got circbuff lock, waiting on cond\n");
         while (circBuff_push(circular_buffer.cb,frame))
         {
@@ -216,7 +217,6 @@ int text_producer(void* _block)
         }
         framenum++;
         pthread_mutex_unlock(&circular_buffer.lock);
-//        printf("In worker, released circbuff lock\n");
     }   
     return framenum;
 
