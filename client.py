@@ -15,7 +15,8 @@ class Sock:
   def send_msg(self, msg):
     self.sock.send(msg)
   def get_msg(self, size):
-    return self.sock.recv(size,socket.MSG_WAITALL)
+    return self.sock.recv(size)
+#    return self.sock.recv(size,socket.MSG_WAITALL)
   def close(self):
     return self.sock.close()
 
